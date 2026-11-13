@@ -881,7 +881,7 @@
           <text class="rule-item">2. 每回合四选一：拿 3 枚不同色筹码（或同色 2 枚，该色需剩 ≥4）、预留 1 张卡并拿 1 枚黄金、购买 1 张桌面卡或预留卡。</text>
           <text class="rule-item">3. 卡牌左下角气泡是卡面印刷成本（原作数值，不随你的筹码变化）；每持有 1 张同色发展卡，该色实付就减 1。桌面上绿框＝现有筹码直接可买，金框＝缺口需用黄金补齐。</text>
           <text class="rule-item">4. 发展卡提供声望与永久红利；贵族牌在回合末自动判定，满足红利要求即 +3 声望。每人筹码上限 10 枚，预留卡上限 3 张。已预留的卡就铺在桌面左侧，随时可点开购买。</text>
-          <text class="rule-item">5. 有人达到 15 声望后打完本轮即结算（剩余席位各行动一次）；达标者若已是最后一号位则立即结算；同分时发展卡少者胜。</text>
+          <text class="rule-item">5. 开局随机抽出 1 号位，其余按座次顺延编号，行动恒从 1 号位开始；有人达到 15 声望后打完本轮、由最后一号位收尾结算（4 人局即 4 号位）；若最后一号位自己达标则立即结算；同分时发展卡少者胜。</text>
           <text class="rule-item">6. 断线、切后台或重进小程序会自动回到原来的房间与座位；房主结束后房间失效，自动退回首页。</text>
           <text class="rule-item">7. 房间可按 10 / 30 / 60 / 90 / 120 秒或不限时对局；超时回合由机器人强制打完并结束（含退还筹码）——自己超时本机接管，别人超时由房主在宽限 12 秒后接管。</text>
           <text class="rule-item">8. 回合末筹码超过 10 枚时，按官方规则可退还任意颜色的筹码（含黄金），同色可退多枚，只需退到 10 枚：重复点同一枚筹码即可累加，点筹码上的「−」逐枚撤回。</text>
@@ -932,7 +932,7 @@
                   <text wx:if="{{item.isMe}}" class="rank-me-tag">你</text>
                   <text wx:if="{{item.autoPlay}}" class="rank-me-tag is-auto">托管</text>
                 </view>
-                <text class="rank-seat">{{item.seat + 1}} 号位</text>
+                <text class="rank-seat">{{item.seatLabel}}</text>
               </view>
             </view>
             <view class="rank-col-pt">

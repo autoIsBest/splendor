@@ -181,6 +181,13 @@ async function list(cloud, roomCode, now) {
 function chatVM(messages, mySeat, now, panelOpen, tab, opts) {
   const o = opts || {};
   const t = typeof now === 'number' ? now : Date.now();
+  // 气泡里的号位必须跟牌桌同一套编号：本局 1 号位由 startSeat 随机抽出，
+  // 沿数组索引顺延。没传锚点（老调用 / 非牌桌屏）时退回原来的 index+1。
+  function seatNo(i) {
+    const n = Number(o.playerCount) || 0;
+    if (!n || typeof o.seatStart !== 'number') return Number(i) + 1;
+    return ((Number(i) - o.seatStart) % n + n) % n + 1;
+  }
   const sorted = (messages || []).slice().sort(function (a, b) { return a.at - b.at; });
   const seen = {};
   const bubbles = [];
@@ -192,15 +199,15 @@ function chatVM(messages, mySeat, now, panelOpen, tab, opts) {
     bubbles.unshift({
       id: m.id,
       seat: m.seat,
-      seatLabel: (m.seat + 1) + ' 号位',
-      name: Nick.maskName(m.name) || ((m.seat + 1) + ' 号位'),
+      seatLabel: seatNo(m.seat) + ' 号位',
+      name: Nick.maskName(m.name) || (seatNo(m.seat) + ' 号位'),
       mine: m.seat === mySeat,
       text: m.kind === 'emoji' ? (m.label || '') : m.text,
       icon: m.kind === 'emoji' ? m.icon : '',
       isEmoji: m.kind === 'emoji',
       tone: m.tone || '',
       targetLabel: (typeof m.targetSeat === 'number' && m.targetSeat >= 0)
-        ? ('→ ' + (m.targetSeat + 1) + ' 号位') : ''
+        ? ('→ ' + seatNo(m.targetSeat) + ' 号位') : ''
     });
     if (bubbles.length >= 3) break;
   }

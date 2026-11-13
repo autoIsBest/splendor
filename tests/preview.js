@@ -830,5 +830,34 @@ const tp = themesPreview.page;
 tp.onUnload();
 console.log('四主题入口 / 三套主题房间与牌桌 / 退房恢复 OK');
 
+/* ---------- 随机 1 号位：渲染层号位随锚点一起换 ---------- */
+{
+  const b = run(1280, 720);
+  const ENode = require(path.join(ROOT, 'utils/game-engine.js'));
+  b.page.onStartSolo();                       // 人机局默认 startSeat = 0
+  assert(b.host.innerHTML.indexOf('1 号位') > 0, '默认锚点下应显示 1 号位');
+  b.page.state.startSeat = 1;
+  b.page.state.current = 1;
+  b.page.refresh('');
+  const rotated = b.host.innerHTML;
+  const mine = ENode.seatNoOf(b.page.state, b.page.mySeat || 0) + ' 号位';
+  assert(b.page.data.meSeatLabel === mine, '工作台按新锚点换算号位：' + b.page.data.meSeatLabel);
+  assert(b.page.data.meSeatLabel === '2 号位', '2 人局锚点换到索引 1 后本机应显示 2 号位');
+  assert(rotated.indexOf(mine) > 0, '换算后的号位要真的渲染进 HTML');
+  assert(rotated.indexOf('{{') < 0, '换锚点后不能残留未求值表达式');
+  // 结算排名表也必须显示预算好的 seatLabel，而不是 WXML 里写死的 index+1
+  b.page._resultRecorded = true;              // 避免这里顺带落一条战绩
+  b.page.state.gameOver = true;
+  b.page.state.winner = 0;
+  b.page.refresh('');
+  const resultHtml = b.host.innerHTML;
+  assert(resultHtml.indexOf('rank-seat') > 0, '结算排名表应渲染');
+  assert(resultHtml.indexOf('1 号位') > 0 && resultHtml.indexOf('2 号位') > 0,
+    '结算表应按本局号位显示两名玩家');
+  assert(resultHtml.indexOf('{{') < 0, '结算表不能有未求值表达式');
+  b.page.onUnload();
+  console.log('渲染层 · 随机 1 号位号位随锚点一起换 / 结算表 seatLabel OK');
+}
+
 console.log('\nALL PREVIEW TESTS PASSED');
 process.exit(0);

@@ -109,6 +109,21 @@ eq(C.chatVM([], 0, NOW, true, 'text', {
 }).isPick, true, '切回快捷语 tab 不应残留选目标阶段');
 console.log('OK  气泡视图模型 · TTL / 同席去重 / 3 条上限 / tab 互斥 / 两步定向');
 
+/* 5.1 气泡号位必须跟随本局 1 号位锚点，不能仍按建房下标显示 */
+const rotatedVM = C.chatVM(msgs, 0, NOW, false, 'text', { seatStart: 2, playerCount: 4 });
+const rotatedSeat2 = rotatedVM.bubbles.filter(function (x) { return x.seat === 2; })[0];
+assert(rotatedSeat2, '换锚点后仍应渲染索引 2 的气泡');
+eq(rotatedSeat2.seatLabel, '1 号位', '抽中 1 号位的索引 2 在气泡里显示 1 号位');
+eq(rotatedVM.bubbles.filter(function (x) { return x.seat === 0; })[0].seatLabel,
+  '3 号位', '索引 0 沿座次顺延为 3 号位');
+const seatNoAimed = C.makeMessage('r', 0, '', '我', 'emoji', C.findPreset('emoji', 'e3'), NOW - 10, 2);
+eq(C.chatVM([seatNoAimed], 0, NOW, false, 'text', { seatStart: 2, playerCount: 4 })
+  .bubbles[0].targetLabel, '→ 1 号位', '定向表情的目标也用本局号位');
+eq(C.chatVM(msgs, 0, NOW, false, 'text')
+  .bubbles.filter(function (x) { return x.seat === 2; })[0].seatLabel,
+  '3 号位', '不传锚点的老调用保留数组下标口径');
+console.log('OK  气泡号位 · 跟随本局 1 号位锚点 / 定向目标 / 老调用回退');
+
 /* ---------- 6. 云端读写：字段契约 + 异常静默降级 ---------- */
 function mockCloud(rows, fail) {
   const calls = [];

@@ -860,6 +860,11 @@ page.mySeat = 0;
 page.refresh('');
 page.onRoomStart();
 assert(page.ui.screen === 'game', '全员就绪后房主可开局');
+// 本用例只验「号位标注」口径，把本局 1 号位锚点钉回索引 0 保持确定性；
+// 随机抽出 1 号位后的编号与终局由下面的专项用例覆盖。
+page.state.startSeat = 0;
+page.state.current = 0;
+page.refresh('');
 assert(page.data.meSeatLabel === '1 号位', '本机工作台标注自己的号位');
 assert(page.data.rivals.length === 2, '其余席位进入顶部条');
 assert(page.data.rivals[0].seatNo === 2 && page.data.rivals[1].seatNo === 3, '对手席位条带号位');
@@ -878,19 +883,19 @@ page.mySeat = 0;
 page.refresh('');
 console.log('OK  号位标注 · 席位条 / 工作台 / 状态行同一口径');
 
-/* ---------- 开局先手随机：不能恒为房主，且全场必须一致 ---------- */
+/* ---------- 随机 1 号位：不能恒为房主，号位编号与起始/末位必须自洽 ---------- */
 {
   const E2 = require(ROOT + '/utils/game-engine.js');
   const R2 = require(ROOT + '/utils/room.js');
 
-  // 分布：4 人局每个席位都应有机会先手
+  // 分布：4 人局每个席位都应有机会抽到 1 号位
   const seen = { 0: 0, 1: 0, 2: 0, 3: 0 };
   for (let i = 0; i < 2000; i++) seen[R2.randomFirstSeat(4)] += 1;
   const each = Object.keys(seen).filter(function (k) { return seen[k] > 300; });
-  assert(each.length === 4, '4 人局四个席位都应能先手：' + JSON.stringify(seen));
+  assert(each.length === 4, '4 人局四个席位都应能抽到 1 号位：' + JSON.stringify(seen));
 
   // 边界：单人 / 非法人数回退 0，绝不返回越界值
-  assert(R2.randomFirstSeat(1) === 0, '单人局先手恒 0');
+  assert(R2.randomFirstSeat(1) === 0, '单人局 1 号位恒为索引 0');
   assert(R2.randomFirstSeat(0) === 0, '人数为 0 时回退 0');
   assert(R2.randomFirstSeat(-3) === 0, '负数人数回退 0');
 
@@ -898,10 +903,19 @@ console.log('OK  号位标注 · 席位条 / 工作台 / 状态行同一口径')
   const seats = [{ name: 'A', uid: 'a' }, { name: 'B', uid: 'b' }, { name: 'C', uid: 'c' }];
   const g = E2.createGame({ playerCount: 3, seats: seats, firstSeat: 2 });
   assert(g.current === 2, '引擎接受 firstSeat 作为行动起点');
+  assert(g.startSeat === 2, '起始席位写进 state，随快照下发给所有端');
   assert(g.players.length === 3, '人数不变');
   assert(g.players[0].name === 'A' && g.players[2].name === 'C', '席位顺序不被打乱，重连仍能按 uid 认回');
+  // 号位从抽中的人起顺延：索引 2 = 1 号位 → 0 = 2 号位 → 1 = 3 号位（末位）
+  assert(E2.seatNoOf(g, 2) === 1, '抽中的席位恒为 1 号位');
+  assert(E2.seatNoOf(g, 0) === 2 && E2.seatNoOf(g, 1) === 3, '其余席沿座次顺延编号');
+  assert(E2.seatNoOf(g, 1) === g.players.length, '末位号位 = 人数，终局在此收尾');
   assert(E2.createGame({ playerCount: 3, seats: seats }).current === 0, '不传 firstSeat 时仍是 0（人机局默认本机先手）');
+  assert(E2.createGame({ playerCount: 3, seats: seats }).startSeat === 0, '人机局 1 号位锚点默认 0');
   assert(E2.createGame({ playerCount: 3, seats: seats, firstSeat: 99 }).current === 0, '越界 firstSeat 安全回退 0');
+  // 老快照没有 startSeat：号位退回数组下标口径，不能整屏显示 1 号位
+  const legacy = { players: [{}, {}, {}] };
+  assert(E2.seatNoOf(legacy, 1) === 2, '缺 startSeat 的老快照按旧口径显示');
 
   // 页面级：房主开局后 current 落在合法范围，且补丁能带出「先手是谁」
   page.mode = 'room';
@@ -914,12 +928,23 @@ console.log('OK  号位标注 · 席位条 / 工作台 / 状态行同一口径')
   page.onRoomStart();
   assert(page.ui.screen === 'game', '房主可开局');
   const cur = page.state.current;
-  assert(cur >= 0 && cur < page.state.players.length, '先手席位在合法范围内：' + cur);
+  assert(cur >= 0 && cur < page.state.players.length, '1 号位席位在合法范围内：' + cur);
   assert(page.state.players.length === 3, '开局人数正确');
-  // 先手不是自己时，状态行要能标出对方号位（不写死 1 号位）
-  assert(page.state.current === cur, '先手在开局后不再变动');
+  assert(page.state.current === cur, '起始席位在开局后不再变动');
+  assert(page.state.startSeat === cur, '1 号位锚点与起始行动者一致，随快照下发全场同口径');
+  assert(JSON.parse(JSON.stringify(page.state)).startSeat === cur,
+    'startSeat 必须随牌局快照 JSON 下发，不能只留在内存里（各端会各自编号）');
+  // 房主（mySeat=0）未必是 1 号位，所有展示都必须按本局锚点换算
+  const myNo = E2.seatNoOf(page.state, 0);
+  assert(page.data.meSeatLabel === myNo + ' 号位', '工作台按本局号位显示自己：' + page.data.meSeatLabel);
+  assert(page.data.seats[0].seatLabel === myNo + ' 号位', '席位条徽章按本局锚点标号位');
+  assert(page.data.statusText.indexOf(E2.seatNoOf(page.state, cur) + ' 号位') >= 0,
+    '状态行标当前行动者的本局号位：' + page.data.statusText);
+  const firstFlags = page.data.seats.filter(function (x) { return x.isFirst; });
+  assert(firstFlags.length === 1 && firstFlags[0].index === cur, '「先」徽章只贴本局 1 号位');
+  assert(E2.seatNoOf(page.state, cur) === 1, '起始行动者恒显示为 1 号位');
 
-  console.log('OK  开局先手随机 · 分布覆盖四席 / 越界回退 / 席位顺序不变');
+  console.log('OK  随机 1 号位 · 分布覆盖四席 / 编号顺延 / 越界回退 / 席位顺序不变');
 }
 
 /* ---------- 右上工具条收起：不遮挡牌桌 ---------- */

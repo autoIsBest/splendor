@@ -3925,6 +3925,24 @@ function pushLog(state, text) {
 }
 
 /**
+ * 席位索引 → 本局号位（1-based）。
+ * ------------------------------------------------------------------
+ * 号位不是建房时钉死的座位，而是从本局「1 号位」锚点起顺延编号：
+ * 锚点恒为 1 号位，沿数组索引循环，末位恒为 n 号位（4 人局即 4 号位）。
+ * 随机量只落在 startSeat 上（谁抽到 1 号位），players 数组与 uid 锚点不动，
+ * 重连、云端快照、房主权限仍按数组索引对齐。
+ *
+ * 老快照没有 startSeat 字段时回退 0，行为与改动前一致。
+ */
+function seatNoOf(state, index) {
+  const s = state || {};
+  const n = (s.players && s.players.length) || 1;
+  const start = Number(s.startSeat) || 0;
+  const i = Number(index) || 0;
+  return ((i - start) % n + n) % n + 1;
+}
+
+/**
  * 2 人局：每色 4 枚，黄金 5 枚；3 人 5 枚 / 4 人 7 枚
  * rand 可选：传入自定义随机源可复现牌序，便于调试与复盘
  */
@@ -3935,8 +3953,10 @@ function createGame(playerCount, rand) {
     ? playerCount : { playerCount: playerCount };
   const n = opt.playerCount || 2;
   const shuffleRand = rand || opt.rand || Math.random;
-  // 先手席位：联机局由房主随机后写进快照下发，人机局默认 0（本机先手）。
-  // 只改行动起点，不动 players 的排列 —— 席位索引是身份锚点，
+  // 本局「1 号位」锚点：联机局由房主随机抽出后写进快照下发，人机局默认 0。
+  // 号位编号从这个锚点起沿数组索引顺延：锚点恒为 1 号位、末位恒为 n 号位，
+  // 所以「从 1 号位开始」与「打完本轮到 4 号位结束」是同一套顺序，不会错位。
+  // 只改这个锚点，不动 players 排列 —— 席位索引是身份锚点，
   // 重连与云端快照都按它对齐，打乱会导致认错席位。
   const first = Math.floor(Number(opt.firstSeat) || 0);
   const startSeat = (first >= 0 && first < n) ? first : 0;
@@ -3951,6 +3971,8 @@ function createGame(playerCount, rand) {
     board: [[], [], []],
     nobles: [],
     current: startSeat,
+    // 本局 1 号位所在的数组索引。随快照下发，所有端按同一锚点渲染号位与结算终局。
+    startSeat: startSeat,
     turnCount: 0,
     endAtTurn: -1,
     gameOver: false,
@@ -4136,10 +4158,14 @@ function finishTurn(state) {
 
   if (state.endAtTurn < 0 && state.players[idx].points >= 15) {
     // 官方规则：有人达到 15 声望后，打完「本轮」再结算，让所有人的回合数相同。
-    // 本轮还剩几席 = 总人数 - 1 - 达标者的席位下标。
-    // 达标者若已是最后一号位，本轮已打完（rest=0），必须立即结算 —— 旧实现无条件
-    // 加 players.length-1 个回合，会轮转回 1 号位凭空多打一整轮。
-    const rest = state.players.length - 1 - idx;
+    // 本轮 = 从 1 号位走到末位号位，所以剩余席数要用达标者「相对 1 号位的位次」，
+    // 不能用数组下标 idx。1 号位由 startSeat 随机抽出，若仍按 idx 算，先手不是
+    // 索引 0 时末位会被误判成数组最后一位：达标后要么多打一整轮，要么少打一席。
+    // 达标者若已是末位号位，本轮已打完（rest=0），必须立即结算。
+    const n = state.players.length;
+    const start = Number(state.startSeat) || 0;
+    const pos = ((idx - start) % n + n) % n;
+    const rest = n - 1 - pos;
     state.endAtTurn = state.turnCount + rest;
     pushLog(state, rest > 0
       ? '有人达到 15 声望 · 本轮剩余 ' + rest + ' 席后结算'
@@ -4436,6 +4462,7 @@ function hasAnyAction(state) {
 
 module.exports = {
   createGame: createGame,
+  seatNoOf: seatNoOf,
   refill: refill,
   tokenTotal: tokenTotal,
   getDiscounts: getDiscounts,
@@ -4863,17 +4890,21 @@ function normTurnLimit(v) {
 }
 
 /**
- * 随机开局先手席位。
+ * 随机抽出本局的「1 号位」（起始玩家）。
  * ------------------------------------------------------------------
- * 联机开房时座位按「房主先进 = 0 号」固定分配，如果先手恒为 0 号，
+ * 联机开房时座位按「房主先进 = 0 号」固定分配，如果 1 号位恒为索引 0，
  * 房主每局都先动，后加入的人永远后手，不公平。
  *
- * 关键约束：**只随机先手，不打乱 seats 数组**。
+ * 关键约束：**只随机号位锚点，不打乱 seats 数组**。
  * seats 的索引同时是身份锚点 —— 加入房间按 uid 占位、重连按 uid 认回、
  * 云端快照按索引对齐。一旦打乱数组，重连就会认到别人的席位、客户端
- * 与快照错位。所以随机量只落在 state.current 这一个字段上。
+ * 与快照错位。所以随机量只落在 state.startSeat / state.current 上。
  *
- * 结果由房主生成并随快照下发，其他端直接读 state.current，
+ * 抽中的人即 1 号位，号位沿数组索引顺延编号，末位恒为 n 号位（4 人局即 4 号位）。
+ * 因此「从 1 号位开始行动」与「打完本轮到 4 号位结算」共用同一套顺序 ——
+ * 旧实现随机先手却仍按数组末位结算，先手不是索引 0 时终局会多打或少打一整轮。
+ *
+ * 结果由房主生成并随快照下发，其他端直接读 state.startSeat / current，
  * 不各自抽签（各自抽必然不一致，牌局立刻分叉）。
  */
 function randomFirstSeat(playerCount, rand) {
@@ -6874,6 +6905,13 @@ async function list(cloud, roomCode, now) {
 function chatVM(messages, mySeat, now, panelOpen, tab, opts) {
   const o = opts || {};
   const t = typeof now === 'number' ? now : Date.now();
+  // 气泡里的号位必须跟牌桌同一套编号：本局 1 号位由 startSeat 随机抽出，
+  // 沿数组索引顺延。没传锚点（老调用 / 非牌桌屏）时退回原来的 index+1。
+  function seatNo(i) {
+    const n = Number(o.playerCount) || 0;
+    if (!n || typeof o.seatStart !== 'number') return Number(i) + 1;
+    return ((Number(i) - o.seatStart) % n + n) % n + 1;
+  }
   const sorted = (messages || []).slice().sort(function (a, b) { return a.at - b.at; });
   const seen = {};
   const bubbles = [];
@@ -6885,15 +6923,15 @@ function chatVM(messages, mySeat, now, panelOpen, tab, opts) {
     bubbles.unshift({
       id: m.id,
       seat: m.seat,
-      seatLabel: (m.seat + 1) + ' 号位',
-      name: Nick.maskName(m.name) || ((m.seat + 1) + ' 号位'),
+      seatLabel: seatNo(m.seat) + ' 号位',
+      name: Nick.maskName(m.name) || (seatNo(m.seat) + ' 号位'),
       mine: m.seat === mySeat,
       text: m.kind === 'emoji' ? (m.label || '') : m.text,
       icon: m.kind === 'emoji' ? m.icon : '',
       isEmoji: m.kind === 'emoji',
       tone: m.tone || '',
       targetLabel: (typeof m.targetSeat === 'number' && m.targetSeat >= 0)
-        ? ('→ ' + (m.targetSeat + 1) + ' 号位') : ''
+        ? ('→ ' + seatNo(m.targetSeat) + ' 号位') : ''
     });
     if (bubbles.length >= 3) break;
   }
@@ -7468,7 +7506,7 @@ module.exports = {
 });
 
 
-var EXPR_TEXTS = ["themeId","stageRotate","stageScale","themeFallback","screen === 'game'","rivalStripWidth","rivals","item.isCurrent ? 'is-current' : ''","item.isBot ? 'is-bot' : ''","item.empty ? 'is-empty' : ''","item.index","item.avatarUrl","item.autoPlay ? 'is-auto' : ''","item.avatarHue","item.initial","item.autoPlay","item.seatNo","item.name","item.reservedCount","item.pointsReached ? 'is-reached' : ''","item.pointsText","item.rows.discRow","cell.sqClass","cell.zero ? 'is-zero' : ''","cell.wide ? 'is-wide' : ''","cell.light ? 'is-light' : ''","cell.numText","item.rows.tokenRow","cell.gemClass","cell.isGold ? 'is-gold' : ''","item.turnTag","item.isFirst","isMyTurn ? 'is-mine' : ''","statusLong ? 'is-long' : ''","statusText","turnClock.on","turnClock.urgent ? 'is-urgent' : ''","turnClock.text","turnText","netNotice","lastMove.text","turnClock.pct","topRightCollapsed ? 'is-collapsed' : ''","topRightTop","topRightToggleLabel","!topRightCollapsed","roomMode","chat.open ? 'is-open' : ''","turnFlash","turnFlash.tone","turnFlash.seatLabel","turnFlash.title","turnFlash.sub","nobleChoice && nobleChoice.mine","nobleChoice.seatLabel","nobleChoice.options.length","nobleChoice.options","item.id","item.photoClass","item.artClass","item.points","item.title","item.reqs","req.gemClass","req.num","nobleChoice && nobleChoice.waiting","nobleChoice.name","reservedCards.length","reservedCards","item.buyClass","item.tiltStyle","item.gemClass","item.costDense ? 'is-dense' : ''","item.costs","cost.gemClass","cost.ink","cost.display","emptyReservedSlots","decks","item.lv","item.style","item.label","item.count","rows","row.rowClass","row.label","row.cards","card.selected ? 'is-selected' : ''","row.lv","ci","!card.empty","card.buyClass","card.tiltStyle","card.photoClass","card.artClass","card.name","card.pointsText","card.gemClass","card.costDense ? 'is-dense' : ''","card.costs","bankPiles","item.slotClass","item.isGold ? 'is-gold' : ''","item.selected ? 'is-selected' : ''","item.disabled ? 'is-disabled' : ''","item.key","item.stack","item.coinClass","req.style","item.topStyle","item.showMinus","item.pickedMany","item.picked","noblesCompact ? 'is-compact' : ''","nobles","nobles.length === 0","isMyTurn ? 'is-my-turn' : ''","meSeatLabel","me.nameText","me.pointsReached ? 'is-reached' : ''","me.pointsText","me.reservedText","me.totalTokens > 10 ? 'is-over' : ''","me.tokenText","me.res.discount","item.sqClass","item.zero ? 'is-zero' : ''","item.wide ? 'is-wide' : ''","item.light ? 'is-light' : ''","item.numText","me.res.tokens","needDiscard ? 'can-discard' : ''","(needDiscard && item.pickedCount > 0) ? 'is-picked' : ''","needDiscard && item.pickedCount > 0","item.pickedCount","isMyTurn ? '' : 'is-idle'","pick.kind","pick.delta > 0","pick.delta","pick.title","pick.fromText","pick.toText","canConfirm ? '' : 'btn-off'","isMyTurn ? pick.label : '等待其他玩家'","(selectionCount > 0 || discardPlanCount > 0 || detail) ? '' : 'btn-off'","canPass","canAutoPlay","meAutoPlay ? 'is-on' : ''","meAutoPlay ? '收回' : '托管'","isMyTurn ? (pick.reason || pick.goldLine || pickHint) : pickHint","showcaseList","item.motionStyle","item.badgeText","item.subtitle","item.kind === 'card'","item.blindBack","item.deckArtClass","item.deckLabel","item.card.photoClass","item.card.artClass","item.card.name","item.card.pointsText","item.card.gemClass","item.card.costs","item.gotGold","item.kind === 'noble'","item.nobleVM.photoClass","item.nobleVM.artClass","item.nobleVM.points","item.nobleVM.title","item.nobleVM.reqs","item.kind === 'take'","item.coins","cost.itemStyle","cost.coinClass","cost.label","chatPanelTop","chat.open","chat.isText ? 'is-active' : ''","chat.isEmoji ? 'is-active' : ''","chat.isText","chat.texts","item.text","chat.isEmoji && chat.isPick","chat.emojis","item.icon","chat.isEmoji && chat.isTarget","chat.pending.icon","chat.pending.label","chat.targets","item.isSelf ? 'is-self' : ''","item.seat","item.seatSub","!chat.open","chat.bubbles","item.mine ? 'is-mine' : ''","item.isEmoji ? 'is-emoji' : ''","item.seatLabel","item.targetLabel","chat.projectiles","item.isThrow ? 'is-throw' : 'is-gift'","item.isThrow","item.targetStyle","item.isGift","item.fromLabel","item.toLabel","chat.flyList","screen === 'home'","home.avatarUrl","home.nickname","home.rankTitle","home.onlineReady ? 'is-ready' : 'is-pending'","home.onlineText","topRightTop > 82 ? topRightTop : 82","home.notice && !home.dialog","home.notice","friendsPanel.onlineCount > 0","friendsPanel.onlineCount","home.dialog","home.dialog === 'create' ? 'is-create' : ''","home.dialog === 'solo' ? '人机对战设置' : (home.dialog === 'quick' ? '选择对局人数' : (home.dialog === 'create' ? '创建房间' : '加入房间'))","home.dialog === 'create'","home.themes","item.active ? 'is-active' : ''","item.tag","item.description","item.active","home.dialog === 'quick'","home.soloCounts","item.n","item.n === 2 ? '1 名对手' : (item.n === 3 ? '2 名对手' : '3 名对手')","home.dialog === 'solo'","home.roomCounts","home.turnLimits","item.value","home.dialog === 'join'","home.joinCode","home.dialog !== 'solo' && home.dialog !== 'quick' && home.cloudHint","home.cloudHint","screen === 'room'","roomScreen.code","roomScreen.backend","roomScreen.statusText","roomScreen.themeName","roomScreen.turnLimitText","roomScreen.backendHint","roomScreen.seats","item.ready ? 'is-ready' : ''","item.tappable ? 'is-tappable' : ''","item.empty ? '+' : item.initial","item.ready ? 'is-ok' : (item.empty ? 'is-wait' : 'is-pending')","item.stateText","item.canToggleBot","item.seatAction","roomScreen.canStart ? 'is-ok' : ''","roomScreen.tip","roomScreen.isHost","roomScreen.counts","roomScreen.turnLimits","roomScreen.notice","roomScreen.creating","roomScreen.createFailed","roomScreen.isHost ? '你是房主 · 全员准备后即可开始' : '准备好后等房主开始'","roomScreen.canStart ? '' : 'btn-off'","roomScreen.startLabel","roomScreen.myReady ? 'btn-off' : ''","detail","detail.card.name","detail.card.level","detail.card.pointsLabel","detail.card.gemLabel","detail.card.buyClass","detail.card.photoClass","detail.card.artClass","detail.card.pointsText","detail.card.gemClass","detail.card.costs","detail.costLines","item.missing ? 'is-missing' : ''","item.raw","item.discount","item.need","detail.canBuy ? 'ok' : 'no'","detail.summary","detail.actionNote","detail.canBuy && detail.canAct","detail.buyLabel","!detail.canBuy && detail.canReserve && detail.canAct","showReserved","reservedCards.length === 0","showRecords && records","records.rankTitle","records.stats.total","records.stats.wins","records.stats.winRate","records.stats.best","records.stats.avgScore","records.stats.streak","records.items","item.resultClass","item.resultText","item.modeText","item.rankText","item.dateText","item.scoreText","item.turnsText ? ' · ' + item.turnsText : ''","records.empty","records.notice","!records.empty","showRules","playerCount","endNotice","endNotice.leaderSeat","endNotice.leaderName","endNotice.leftText","gameOver","resultTitle","resultDetail","resultBoard","resultBoard.rows","item.isWinner ? 'is-winner' : ''","item.isMe ? 'is-me' : ''","item.rank === 1 ? 'is-first' : ''","item.rank","item.isMe","item.seat + 1","item.cardCount","item.cardPoints","item.nobleCount","item.noblePoints","item.totalTokens","item.disc","item.tok","showLobby","item.ready ? 'is-ok' : ''","playerDetail","playerDetail.title","playerDetail.subtitle","playerDetail.avatarUrl","playerDetail.avatarHue","playerDetail.points","playerDetail.cardCount","playerDetail.reservedCount","playerDetail.totalTokens","playerDetail.scoreLines","playerDetail.columns","cell.bonusShow ? '' : 'is-zero'","cell.bonusWide ? 'is-wide' : ''","cell.bonus","cell.tokenShow ? '' : 'is-zero'","cell.tokenWide ? 'is-wide' : ''","cell.token","playerDetail.reservedCards.length","playerDetail.reservedCards","item.level","item.pointsLabel","item.gemLabel","playerDetail.emptyReserved","playerDetail.nobles.length","playerDetail.nobles","playerDetail.emptyNobles","showProfile","profileDialog.avatarUrl","profileDialog.nickname","profileDialog.avatarName","profileDialog.playerId","profileDialog.identityLabel","profileDialog.sinceText","profileDialog.identityDetail","profileDialog.showLogin","!profileDialog.canLogin","profileDialog.loginLabel","profileDialog.loginHint","profileDialog.rankTitle","profileDialog.statsLine","canUseNativeAvatar","profileDialog.nicknames","item","profileDialog.avatars","item.hue","profileDialog.notice","screen !== 'game'","showFriends","friendsPanel.count","friendsPanel.query","friendsPanel.found","friendsPanel.found.avatarStyle","!friendsPanel.found.avatarUrl","friendsPanel.found.initial","friendsPanel.found.nickname","friendsPanel.notice","friendsPanel.list","item.online ? 'is-online' : ''","item.avatarStyle","!item.avatarUrl","item.nickname","item.statusText","item.shortId","item.canInvite","item.uid","!item.canInvite && !friendsPanel.canInvite","!item.canInvite && friendsPanel.canInvite","friendsPanel.empty","!friendsPanel.ready","friendsPanel.ready","friendsPanel.myId","invitePop","invitePop.fromName","invitePop.roomCode","invitePop.moreText","showLeaderboard && leaderboard","leaderboard.sourceLine","leaderboard.showLoginHint","leaderboard.hasMe","leaderboard.myRankText","leaderboard.provisional","leaderboard.needText","leaderboard.rows","item.isChampion ? 'is-champion' : ''","item.section === 'trial' ? 'is-trial' : ''","item.sectionHead","item.section","item.sectionSub","item.sectionHead ? 'has-section' : ''","item.isChampion","!item.isChampion && item.avatarUrl","!item.isChampion && !item.avatarUrl","item.provisional","item.ratingText","item.provisional ? 'is-provisional' : ''","item.winRateFullText","item.bestWinText","item.avgScoreText","item.avgCardsText","item.avgNoblesText","item.avgTurnText","leaderboard.empty","leaderboard.scrollable","leaderboard.formulaText"];
+var EXPR_TEXTS = ["themeId","stageRotate","stageScale","themeFallback","screen === 'game'","rivalStripWidth","rivals","item.isCurrent ? 'is-current' : ''","item.isBot ? 'is-bot' : ''","item.empty ? 'is-empty' : ''","item.index","item.avatarUrl","item.autoPlay ? 'is-auto' : ''","item.avatarHue","item.initial","item.autoPlay","item.seatNo","item.name","item.reservedCount","item.pointsReached ? 'is-reached' : ''","item.pointsText","item.rows.discRow","cell.sqClass","cell.zero ? 'is-zero' : ''","cell.wide ? 'is-wide' : ''","cell.light ? 'is-light' : ''","cell.numText","item.rows.tokenRow","cell.gemClass","cell.isGold ? 'is-gold' : ''","item.turnTag","item.isFirst","isMyTurn ? 'is-mine' : ''","statusLong ? 'is-long' : ''","statusText","turnClock.on","turnClock.urgent ? 'is-urgent' : ''","turnClock.text","turnText","netNotice","lastMove.text","turnClock.pct","topRightCollapsed ? 'is-collapsed' : ''","topRightTop","topRightToggleLabel","!topRightCollapsed","roomMode","chat.open ? 'is-open' : ''","turnFlash","turnFlash.tone","turnFlash.seatLabel","turnFlash.title","turnFlash.sub","nobleChoice && nobleChoice.mine","nobleChoice.seatLabel","nobleChoice.options.length","nobleChoice.options","item.id","item.photoClass","item.artClass","item.points","item.title","item.reqs","req.gemClass","req.num","nobleChoice && nobleChoice.waiting","nobleChoice.name","reservedCards.length","reservedCards","item.buyClass","item.tiltStyle","item.gemClass","item.costDense ? 'is-dense' : ''","item.costs","cost.gemClass","cost.ink","cost.display","emptyReservedSlots","decks","item.lv","item.style","item.label","item.count","rows","row.rowClass","row.label","row.cards","card.selected ? 'is-selected' : ''","row.lv","ci","!card.empty","card.buyClass","card.tiltStyle","card.photoClass","card.artClass","card.name","card.pointsText","card.gemClass","card.costDense ? 'is-dense' : ''","card.costs","bankPiles","item.slotClass","item.isGold ? 'is-gold' : ''","item.selected ? 'is-selected' : ''","item.disabled ? 'is-disabled' : ''","item.key","item.stack","item.coinClass","req.style","item.topStyle","item.showMinus","item.pickedMany","item.picked","noblesCompact ? 'is-compact' : ''","nobles","nobles.length === 0","isMyTurn ? 'is-my-turn' : ''","meSeatLabel","me.nameText","me.pointsReached ? 'is-reached' : ''","me.pointsText","me.reservedText","me.totalTokens > 10 ? 'is-over' : ''","me.tokenText","me.res.discount","item.sqClass","item.zero ? 'is-zero' : ''","item.wide ? 'is-wide' : ''","item.light ? 'is-light' : ''","item.numText","me.res.tokens","needDiscard ? 'can-discard' : ''","(needDiscard && item.pickedCount > 0) ? 'is-picked' : ''","needDiscard && item.pickedCount > 0","item.pickedCount","isMyTurn ? '' : 'is-idle'","pick.kind","pick.delta > 0","pick.delta","pick.title","pick.fromText","pick.toText","canConfirm ? '' : 'btn-off'","isMyTurn ? pick.label : '等待其他玩家'","(selectionCount > 0 || discardPlanCount > 0 || detail) ? '' : 'btn-off'","canPass","canAutoPlay","meAutoPlay ? 'is-on' : ''","meAutoPlay ? '收回' : '托管'","isMyTurn ? (pick.reason || pick.goldLine || pickHint) : pickHint","showcaseList","item.motionStyle","item.badgeText","item.subtitle","item.kind === 'card'","item.blindBack","item.deckArtClass","item.deckLabel","item.card.photoClass","item.card.artClass","item.card.name","item.card.pointsText","item.card.gemClass","item.card.costs","item.gotGold","item.kind === 'noble'","item.nobleVM.photoClass","item.nobleVM.artClass","item.nobleVM.points","item.nobleVM.title","item.nobleVM.reqs","item.kind === 'take'","item.coins","cost.itemStyle","cost.coinClass","cost.label","chatPanelTop","chat.open","chat.isText ? 'is-active' : ''","chat.isEmoji ? 'is-active' : ''","chat.isText","chat.texts","item.text","chat.isEmoji && chat.isPick","chat.emojis","item.icon","chat.isEmoji && chat.isTarget","chat.pending.icon","chat.pending.label","chat.targets","item.isSelf ? 'is-self' : ''","item.seat","item.seatSub","!chat.open","chat.bubbles","item.mine ? 'is-mine' : ''","item.isEmoji ? 'is-emoji' : ''","item.seatLabel","item.targetLabel","chat.projectiles","item.isThrow ? 'is-throw' : 'is-gift'","item.isThrow","item.targetStyle","item.isGift","item.fromLabel","item.toLabel","chat.flyList","screen === 'home'","home.avatarUrl","home.nickname","home.rankTitle","home.onlineReady ? 'is-ready' : 'is-pending'","home.onlineText","topRightTop > 82 ? topRightTop : 82","home.notice && !home.dialog","home.notice","friendsPanel.onlineCount > 0","friendsPanel.onlineCount","home.dialog","home.dialog === 'create' ? 'is-create' : ''","home.dialog === 'solo' ? '人机对战设置' : (home.dialog === 'quick' ? '选择对局人数' : (home.dialog === 'create' ? '创建房间' : '加入房间'))","home.dialog === 'create'","home.themes","item.active ? 'is-active' : ''","item.tag","item.description","item.active","home.dialog === 'quick'","home.soloCounts","item.n","item.n === 2 ? '1 名对手' : (item.n === 3 ? '2 名对手' : '3 名对手')","home.dialog === 'solo'","home.roomCounts","home.turnLimits","item.value","home.dialog === 'join'","home.joinCode","home.dialog !== 'solo' && home.dialog !== 'quick' && home.cloudHint","home.cloudHint","screen === 'room'","roomScreen.code","roomScreen.backend","roomScreen.statusText","roomScreen.themeName","roomScreen.turnLimitText","roomScreen.backendHint","roomScreen.seats","item.ready ? 'is-ready' : ''","item.tappable ? 'is-tappable' : ''","item.empty ? '+' : item.initial","item.ready ? 'is-ok' : (item.empty ? 'is-wait' : 'is-pending')","item.stateText","item.canToggleBot","item.seatAction","roomScreen.canStart ? 'is-ok' : ''","roomScreen.tip","roomScreen.isHost","roomScreen.counts","roomScreen.turnLimits","roomScreen.notice","roomScreen.creating","roomScreen.createFailed","roomScreen.isHost ? '你是房主 · 全员准备后即可开始' : '准备好后等房主开始'","roomScreen.canStart ? '' : 'btn-off'","roomScreen.startLabel","roomScreen.myReady ? 'btn-off' : ''","detail","detail.card.name","detail.card.level","detail.card.pointsLabel","detail.card.gemLabel","detail.card.buyClass","detail.card.photoClass","detail.card.artClass","detail.card.pointsText","detail.card.gemClass","detail.card.costs","detail.costLines","item.missing ? 'is-missing' : ''","item.raw","item.discount","item.need","detail.canBuy ? 'ok' : 'no'","detail.summary","detail.actionNote","detail.canBuy && detail.canAct","detail.buyLabel","!detail.canBuy && detail.canReserve && detail.canAct","showReserved","reservedCards.length === 0","showRecords && records","records.rankTitle","records.stats.total","records.stats.wins","records.stats.winRate","records.stats.best","records.stats.avgScore","records.stats.streak","records.items","item.resultClass","item.resultText","item.modeText","item.rankText","item.dateText","item.scoreText","item.turnsText ? ' · ' + item.turnsText : ''","records.empty","records.notice","!records.empty","showRules","playerCount","endNotice","endNotice.leaderSeat","endNotice.leaderName","endNotice.leftText","gameOver","resultTitle","resultDetail","resultBoard","resultBoard.rows","item.isWinner ? 'is-winner' : ''","item.isMe ? 'is-me' : ''","item.rank === 1 ? 'is-first' : ''","item.rank","item.isMe","item.cardCount","item.cardPoints","item.nobleCount","item.noblePoints","item.totalTokens","item.disc","item.tok","showLobby","item.ready ? 'is-ok' : ''","playerDetail","playerDetail.title","playerDetail.subtitle","playerDetail.avatarUrl","playerDetail.avatarHue","playerDetail.points","playerDetail.cardCount","playerDetail.reservedCount","playerDetail.totalTokens","playerDetail.scoreLines","playerDetail.columns","cell.bonusShow ? '' : 'is-zero'","cell.bonusWide ? 'is-wide' : ''","cell.bonus","cell.tokenShow ? '' : 'is-zero'","cell.tokenWide ? 'is-wide' : ''","cell.token","playerDetail.reservedCards.length","playerDetail.reservedCards","item.level","item.pointsLabel","item.gemLabel","playerDetail.emptyReserved","playerDetail.nobles.length","playerDetail.nobles","playerDetail.emptyNobles","showProfile","profileDialog.avatarUrl","profileDialog.nickname","profileDialog.avatarName","profileDialog.playerId","profileDialog.identityLabel","profileDialog.sinceText","profileDialog.identityDetail","profileDialog.showLogin","!profileDialog.canLogin","profileDialog.loginLabel","profileDialog.loginHint","profileDialog.rankTitle","profileDialog.statsLine","canUseNativeAvatar","profileDialog.nicknames","item","profileDialog.avatars","item.hue","profileDialog.notice","screen !== 'game'","showFriends","friendsPanel.count","friendsPanel.query","friendsPanel.found","friendsPanel.found.avatarStyle","!friendsPanel.found.avatarUrl","friendsPanel.found.initial","friendsPanel.found.nickname","friendsPanel.notice","friendsPanel.list","item.online ? 'is-online' : ''","item.avatarStyle","!item.avatarUrl","item.nickname","item.statusText","item.shortId","item.canInvite","item.uid","!item.canInvite && !friendsPanel.canInvite","!item.canInvite && friendsPanel.canInvite","friendsPanel.empty","!friendsPanel.ready","friendsPanel.ready","friendsPanel.myId","invitePop","invitePop.fromName","invitePop.roomCode","invitePop.moreText","showLeaderboard && leaderboard","leaderboard.sourceLine","leaderboard.showLoginHint","leaderboard.hasMe","leaderboard.myRankText","leaderboard.provisional","leaderboard.needText","leaderboard.rows","item.isChampion ? 'is-champion' : ''","item.section === 'trial' ? 'is-trial' : ''","item.sectionHead","item.section","item.sectionSub","item.sectionHead ? 'has-section' : ''","item.isChampion","!item.isChampion && item.avatarUrl","!item.isChampion && !item.avatarUrl","item.provisional","item.ratingText","item.provisional ? 'is-provisional' : ''","item.winRateFullText","item.bestWinText","item.avgScoreText","item.avgCardsText","item.avgNoblesText","item.avgTurnText","leaderboard.empty","leaderboard.scrollable","leaderboard.formulaText"];
 var EXPR_CACHE = {};
 function EV(id, scope) {
   var fn = EXPR_CACHE[id] || (EXPR_CACHE[id] = new Function('$s', 'with ($s) { return (' + EXPR_TEXTS[id] + '); }'));
@@ -11811,7 +11849,7 @@ window.renderStage = function (data) {
     $h.push(ESC("rule-item"));
     $h.push("\"");
     $h.push(">");
-    $h.push("5. 有人达到 15 声望后打完本轮即结算（剩余席位各行动一次）；达标者若已是最后一号位则立即结算；同分时发展卡少者胜。");
+    $h.push("5. 开局随机抽出 1 号位，其余按座次顺延编号，行动恒从 1 号位开始；有人达到 15 声望后打完本轮、由最后一号位收尾结算（4 人局即 4 号位）；若最后一号位自己达标则立即结算；同分时发展卡少者胜。");
     $h.push("</text>");
     $h.push("<text");
     $h.push(" class=\"");
@@ -12061,8 +12099,7 @@ window.renderStage = function (data) {
         $h.push(ESC("rank-seat"));
         $h.push("\"");
         $h.push(">");
-        $h.push(ESC(EV(325, $s42)));
-        $h.push(" 号位");
+        $h.push(ESC(EV(197, $s42)));
         $h.push("</text>");
         $h.push("</div>");
         $h.push("</div>");
@@ -12090,15 +12127,15 @@ window.renderStage = function (data) {
         $h.push("\"");
         $h.push(">");
         $h.push("发展卡 ");
+        $h.push(ESC(EV(325, $s42)));
+        $h.push(" 张（");
         $h.push(ESC(EV(326, $s42)));
-        $h.push(" 张（");
-        $h.push(ESC(EV(327, $s42)));
         $h.push(" 分）· 贵族 ");
-        $h.push(ESC(EV(328, $s42)));
+        $h.push(ESC(EV(327, $s42)));
         $h.push(" 张（");
-        $h.push(ESC(EV(329, $s42)));
+        $h.push(ESC(EV(328, $s42)));
         $h.push(" 分）· 筹码 ");
-        $h.push(ESC(EV(330, $s42)));
+        $h.push(ESC(EV(329, $s42)));
         $h.push("/10");
         $h.push("</text>");
         $h.push("<div");
@@ -12118,7 +12155,7 @@ window.renderStage = function (data) {
         $h.push(">");
         $h.push("折");
         $h.push("</text>");
-        var $list43 = EV(331, $s42) || [];
+        var $list43 = EV(330, $s42) || [];
         for (var $i43 = 0; $i43 < $list43.length; $i43++) {
           var $s43 = Object.create($s42);
           $s43.item = $list43[$i43];
@@ -12148,7 +12185,7 @@ window.renderStage = function (data) {
         $h.push(">");
         $h.push("筹");
         $h.push("</text>");
-        var $list44 = EV(332, $s42) || [];
+        var $list44 = EV(331, $s42) || [];
         for (var $i44 = 0; $i44 < $list44.length; $i44++) {
           var $s44 = Object.create($s42);
           $s44.item = $list44[$i44];
@@ -12215,7 +12252,7 @@ window.renderStage = function (data) {
     $h.push("</div>");
     $h.push("</div>");
   }
-  if (EV(333, $s)) {
+  if (EV(332, $s)) {
     $h.push("<div");
     $h.push(" class=\"");
     $h.push(ESC("overlay overlay-top"));
@@ -12308,7 +12345,7 @@ window.renderStage = function (data) {
       $h.push("</text>");
       $h.push("<text");
       $h.push(" class=\"");
-      $h.push(ESC(("setup-state " + String(EV(334, $s45)))));
+      $h.push(ESC(("setup-state " + String(EV(333, $s45)))));
       $h.push("\"");
       $h.push(">");
       $h.push(ESC(EV(251, $s45)));
@@ -12410,7 +12447,7 @@ window.renderStage = function (data) {
     $h.push("</div>");
     $h.push("</div>");
   }
-  if (EV(335, $s)) {
+  if (EV(334, $s)) {
     $h.push("<div");
     $h.push(" class=\"");
     $h.push(ESC("overlay"));
@@ -12433,14 +12470,14 @@ window.renderStage = function (data) {
     $h.push(ESC("dialog-title"));
     $h.push("\"");
     $h.push(">");
-    $h.push(ESC(EV(336, $s)));
+    $h.push(ESC(EV(335, $s)));
     $h.push("</text>");
     $h.push("<text");
     $h.push(" class=\"");
     $h.push(ESC("dialog-sub"));
     $h.push("\"");
     $h.push(">");
-    $h.push(ESC(EV(337, $s)));
+    $h.push(ESC(EV(336, $s)));
     $h.push("</text>");
     $h.push("</div>");
     $h.push("<div");
@@ -12453,7 +12490,7 @@ window.renderStage = function (data) {
     $h.push(ESC("player-left"));
     $h.push("\"");
     $h.push(">");
-    if (EV(338, $s)) {
+    if (EV(337, $s)) {
       $h.push("<div");
       $h.push(" class=\"");
       $h.push(ESC("player-avatar"));
@@ -12464,7 +12501,7 @@ window.renderStage = function (data) {
       $h.push(ESC("player-avatar-img"));
       $h.push("\"");
       $h.push(" src=\"");
-      $h.push(ESC(String(EV(338, $s))));
+      $h.push(ESC(String(EV(337, $s))));
       $h.push("\"");
       $h.push(" mode=\"");
       $h.push(ESC("aspectFill"));
@@ -12478,7 +12515,7 @@ window.renderStage = function (data) {
       $h.push(ESC("player-avatar"));
       $h.push("\"");
       $h.push(" style=\"");
-      $h.push(ESC(("background:radial-gradient(circle at 32% 24%, rgba(255,240,210,.55), " + String(EV(339, $s)) + " 52%, rgba(20,10,16,.92) 100%);")));
+      $h.push(ESC(("background:radial-gradient(circle at 32% 24%, rgba(255,240,210,.55), " + String(EV(338, $s)) + " 52%, rgba(20,10,16,.92) 100%);")));
       $h.push("\"");
       $h.push(">");
       $h.push("</div>");
@@ -12488,7 +12525,7 @@ window.renderStage = function (data) {
     $h.push(ESC("player-score"));
     $h.push("\"");
     $h.push(">");
-    $h.push(ESC(EV(340, $s)));
+    $h.push(ESC(EV(339, $s)));
     $h.push(" / 15 声望");
     $h.push("</text>");
     $h.push("<text");
@@ -12497,11 +12534,11 @@ window.renderStage = function (data) {
     $h.push("\"");
     $h.push(">");
     $h.push("发展卡 ");
-    $h.push(ESC(EV(341, $s)));
+    $h.push(ESC(EV(340, $s)));
     $h.push(" · 预留 ");
-    $h.push(ESC(EV(342, $s)));
+    $h.push(ESC(EV(341, $s)));
     $h.push(" · 筹码 ");
-    $h.push(ESC(EV(343, $s)));
+    $h.push(ESC(EV(342, $s)));
     $h.push("/10");
     $h.push("</text>");
     $h.push("<text");
@@ -12511,7 +12548,7 @@ window.renderStage = function (data) {
     $h.push(">");
     $h.push("声望构成");
     $h.push("</text>");
-    var $list46 = EV(344, $s) || [];
+    var $list46 = EV(343, $s) || [];
     for (var $i46 = 0; $i46 < $list46.length; $i46++) {
       var $s46 = Object.create($s);
       $s46.item = $list46[$i46];
@@ -12557,7 +12594,7 @@ window.renderStage = function (data) {
     $h.push("筹码");
     $h.push("</text>");
     $h.push("</div>");
-    var $list47 = EV(345, $s) || [];
+    var $list47 = EV(344, $s) || [];
     for (var $i47 = 0; $i47 < $list47.length; $i47++) {
       var $s47 = Object.create($s);
       $s47.item = $list47[$i47];
@@ -12570,22 +12607,22 @@ window.renderStage = function (data) {
       $h.push(">");
       $h.push("<div");
       $h.push(" class=\"");
-      $h.push(ESC(("pd-chip gem-icon " + String(EV(28, $s47)) + " " + String(EV(346, $s47)) + " " + String(EV(347, $s47)) + " " + String(EV(25, $s47)))));
+      $h.push(ESC(("pd-chip gem-icon " + String(EV(28, $s47)) + " " + String(EV(345, $s47)) + " " + String(EV(346, $s47)) + " " + String(EV(25, $s47)))));
       $h.push("\"");
       $h.push(">");
       $h.push("<text");
       $h.push(">");
-      $h.push(ESC(EV(348, $s47)));
+      $h.push(ESC(EV(347, $s47)));
       $h.push("</text>");
       $h.push("</div>");
       $h.push("<div");
       $h.push(" class=\"");
-      $h.push(ESC(("pd-chip is-coin gem-icon " + String(EV(28, $s47)) + " " + String(EV(349, $s47)) + " " + String(EV(350, $s47)) + " " + String(EV(25, $s47)))));
+      $h.push(ESC(("pd-chip is-coin gem-icon " + String(EV(28, $s47)) + " " + String(EV(348, $s47)) + " " + String(EV(349, $s47)) + " " + String(EV(25, $s47)))));
       $h.push("\"");
       $h.push(">");
       $h.push("<text");
       $h.push(">");
-      $h.push(ESC(EV(351, $s47)));
+      $h.push(ESC(EV(350, $s47)));
       $h.push("</text>");
       $h.push("</div>");
       $h.push("</div>");
@@ -12603,7 +12640,7 @@ window.renderStage = function (data) {
     $h.push("\"");
     $h.push(">");
     $h.push("预留卡（");
-    $h.push(ESC(EV(352, $s)));
+    $h.push(ESC(EV(351, $s)));
     $h.push("/3）· 气泡为卡面印刷成本");
     $h.push("</text>");
     $h.push("<div");
@@ -12611,7 +12648,7 @@ window.renderStage = function (data) {
     $h.push(ESC("pd-cards"));
     $h.push("\"");
     $h.push(">");
-    var $list48 = EV(353, $s) || [];
+    var $list48 = EV(352, $s) || [];
     for (var $i48 = 0; $i48 < $list48.length; $i48++) {
       var $s48 = Object.create($s);
       $s48.item = $list48[$i48];
@@ -12699,16 +12736,16 @@ window.renderStage = function (data) {
       $h.push("\"");
       $h.push(">");
       $h.push("第 ");
-      $h.push(ESC(EV(354, $s48)));
+      $h.push(ESC(EV(353, $s48)));
       $h.push(" 级 · ");
-      $h.push(ESC(EV(355, $s48)));
+      $h.push(ESC(EV(354, $s48)));
       $h.push(" · ");
-      $h.push(ESC(EV(356, $s48)));
+      $h.push(ESC(EV(355, $s48)));
       $h.push("红利");
       $h.push("</text>");
       $h.push("</div>");
     }
-    if (EV(357, $s)) {
+    if (EV(356, $s)) {
       $h.push("<text");
       $h.push(" class=\"");
       $h.push(ESC("empty-tip"));
@@ -12724,7 +12761,7 @@ window.renderStage = function (data) {
     $h.push("\"");
     $h.push(">");
     $h.push("贵族到访（");
-    $h.push(ESC(EV(358, $s)));
+    $h.push(ESC(EV(357, $s)));
     $h.push("）");
     $h.push("</text>");
     $h.push("<div");
@@ -12732,7 +12769,7 @@ window.renderStage = function (data) {
     $h.push(ESC("pd-list"));
     $h.push("\"");
     $h.push(">");
-    var $list50 = EV(359, $s) || [];
+    var $list50 = EV(358, $s) || [];
     for (var $i50 = 0; $i50 < $list50.length; $i50++) {
       var $s50 = Object.create($s);
       $s50.item = $list50[$i50];
@@ -12782,7 +12819,7 @@ window.renderStage = function (data) {
       $h.push("</div>");
       $h.push("</div>");
     }
-    if (EV(360, $s)) {
+    if (EV(359, $s)) {
       $h.push("<text");
       $h.push(" class=\"");
       $h.push(ESC("empty-tip"));
@@ -12811,7 +12848,7 @@ window.renderStage = function (data) {
     $h.push("</div>");
     $h.push("</div>");
   }
-  if (EV(361, $s)) {
+  if (EV(360, $s)) {
     $h.push("<div");
     $h.push(" class=\"");
     $h.push(ESC("overlay"));
@@ -12854,7 +12891,7 @@ window.renderStage = function (data) {
     $h.push(ESC("profile-current"));
     $h.push("\"");
     $h.push(">");
-    if (EV(362, $s)) {
+    if (EV(361, $s)) {
       $h.push("<div");
       $h.push(" class=\"");
       $h.push(ESC("profile-avatar"));
@@ -12865,7 +12902,7 @@ window.renderStage = function (data) {
       $h.push(ESC("profile-avatar-img"));
       $h.push("\"");
       $h.push(" src=\"");
-      $h.push(ESC(String(EV(362, $s))));
+      $h.push(ESC(String(EV(361, $s))));
       $h.push("\"");
       $h.push(" mode=\"");
       $h.push(ESC("aspectFill"));
@@ -12891,7 +12928,7 @@ window.renderStage = function (data) {
     $h.push(ESC("profile-nickname"));
     $h.push("\"");
     $h.push(">");
-    $h.push(ESC(EV(363, $s)));
+    $h.push(ESC(EV(362, $s)));
     $h.push("</text>");
     $h.push("<text");
     $h.push(" class=\"");
@@ -12899,7 +12936,7 @@ window.renderStage = function (data) {
     $h.push("\"");
     $h.push(">");
     $h.push("当前头像：");
-    $h.push(ESC(EV(364, $s)));
+    $h.push(ESC(EV(363, $s)));
     $h.push("</text>");
     $h.push("</div>");
     $h.push("</div>");
@@ -12925,14 +12962,14 @@ window.renderStage = function (data) {
     $h.push(ESC("profile-id-value"));
     $h.push("\"");
     $h.push(">");
-    $h.push(ESC(EV(365, $s)));
+    $h.push(ESC(EV(364, $s)));
     $h.push("</text>");
     $h.push("<text");
     $h.push(" class=\"");
     $h.push(ESC("profile-id-tag"));
     $h.push("\"");
     $h.push(">");
-    $h.push(ESC(EV(366, $s)));
+    $h.push(ESC(EV(365, $s)));
     $h.push("</text>");
     $h.push("<text");
     $h.push(" class=\"");
@@ -12940,7 +12977,7 @@ window.renderStage = function (data) {
     $h.push("\"");
     $h.push(">");
     $h.push("加入于 ");
-    $h.push(ESC(EV(367, $s)));
+    $h.push(ESC(EV(366, $s)));
     $h.push("</text>");
     $h.push("</div>");
     $h.push("<text");
@@ -12948,9 +12985,9 @@ window.renderStage = function (data) {
     $h.push(ESC("profile-id-detail"));
     $h.push("\"");
     $h.push(">");
-    $h.push(ESC(EV(368, $s)));
+    $h.push(ESC(EV(367, $s)));
     $h.push("</text>");
-    if (EV(369, $s)) {
+    if (EV(368, $s)) {
       $h.push("<div");
       $h.push(" class=\"");
       $h.push(ESC("profile-login"));
@@ -12962,18 +12999,18 @@ window.renderStage = function (data) {
       $h.push("\"");
       $h.push(" data-tap=\"onWechatLogin\"");
       $h.push(" disabled=\"");
-      $h.push(ESC(String(EV(370, $s))));
+      $h.push(ESC(String(EV(369, $s))));
       $h.push("\"");
       $h.push(">");
-      $h.push(ESC(EV(371, $s)));
+      $h.push(ESC(EV(370, $s)));
       $h.push("</button>");
-      if (EV(372, $s)) {
+      if (EV(371, $s)) {
         $h.push("<text");
         $h.push(" class=\"");
         $h.push(ESC("profile-login-hint"));
         $h.push("\"");
         $h.push(">");
-        $h.push(ESC(EV(372, $s)));
+        $h.push(ESC(EV(371, $s)));
         $h.push("</text>");
       }
       $h.push("</div>");
@@ -12995,14 +13032,14 @@ window.renderStage = function (data) {
     $h.push(ESC("profile-rank"));
     $h.push("\"");
     $h.push(">");
-    $h.push(ESC(EV(373, $s)));
+    $h.push(ESC(EV(372, $s)));
     $h.push("</text>");
     $h.push("<text");
     $h.push(" class=\"");
     $h.push(ESC("profile-stats"));
     $h.push("\"");
     $h.push(">");
-    $h.push(ESC(EV(374, $s)));
+    $h.push(ESC(EV(373, $s)));
     $h.push("</text>");
     $h.push("</div>");
     $h.push("</div>");
@@ -13029,7 +13066,7 @@ window.renderStage = function (data) {
     $h.push(ESC("12"));
     $h.push("\"");
     $h.push(" value=\"");
-    $h.push(ESC(String(EV(363, $s))));
+    $h.push(ESC(String(EV(362, $s))));
     $h.push("\"");
     $h.push(" placeholder=\"");
     $h.push(ESC("输入或选择微信昵称"));
@@ -13037,7 +13074,7 @@ window.renderStage = function (data) {
     $h.push(" data-input=\"onNicknameInput\"");
     $h.push(">");
     $h.push("</input>");
-    if (EV(375, $s)) {
+    if (EV(374, $s)) {
       $h.push("<button");
       $h.push(" class=\"");
       $h.push(ESC("native-avatar-btn"));
@@ -13056,7 +13093,7 @@ window.renderStage = function (data) {
     $h.push(ESC("preset-nicknames"));
     $h.push("\"");
     $h.push(">");
-    var $list52 = EV(376, $s) || [];
+    var $list52 = EV(375, $s) || [];
     for (var $i52 = 0; $i52 < $list52.length; $i52++) {
       var $s52 = Object.create($s);
       $s52.item = $list52[$i52];
@@ -13067,10 +13104,10 @@ window.renderStage = function (data) {
       $h.push("\"");
       $h.push(" data-tap=\"onPickNickname\"");
       $h.push(" data-name=\"");
-      $h.push(ESC(String(EV(377, $s52))));
+      $h.push(ESC(String(EV(376, $s52))));
       $h.push("\"");
       $h.push(">");
-      $h.push(ESC(EV(377, $s52)));
+      $h.push(ESC(EV(376, $s52)));
       $h.push("</div>");
     }
     $h.push("</div>");
@@ -13086,7 +13123,7 @@ window.renderStage = function (data) {
     $h.push(ESC("preset-avatars"));
     $h.push("\"");
     $h.push(">");
-    var $list53 = EV(378, $s) || [];
+    var $list53 = EV(377, $s) || [];
     for (var $i53 = 0; $i53 < $list53.length; $i53++) {
       var $s53 = Object.create($s);
       $s53.item = $list53[$i53];
@@ -13096,7 +13133,7 @@ window.renderStage = function (data) {
       $h.push(ESC(("preset-avatar " + String(EV(223, $s53)))));
       $h.push("\"");
       $h.push(" style=\"");
-      $h.push(ESC(("background:radial-gradient(circle at 32% 24%, rgba(255,240,210,.55), " + String(EV(379, $s53)) + " 52%, rgba(20,10,16,.92) 100%);")));
+      $h.push(ESC(("background:radial-gradient(circle at 32% 24%, rgba(255,240,210,.55), " + String(EV(378, $s53)) + " 52%, rgba(20,10,16,.92) 100%);")));
       $h.push("\"");
       $h.push(" data-tap=\"onPickAvatar\"");
       $h.push(" data-key=\"");
@@ -13110,13 +13147,13 @@ window.renderStage = function (data) {
       $h.push("</div>");
     }
     $h.push("</div>");
-    if (EV(380, $s)) {
+    if (EV(379, $s)) {
       $h.push("<text");
       $h.push(" class=\"");
       $h.push(ESC("room-notice"));
       $h.push("\"");
       $h.push(">");
-      $h.push(ESC(EV(380, $s)));
+      $h.push(ESC(EV(379, $s)));
       $h.push("</text>");
     }
     $h.push("<text");
@@ -13140,7 +13177,7 @@ window.renderStage = function (data) {
     $h.push(">");
     $h.push("保存资料");
     $h.push("</div>");
-    if (EV(381, $s)) {
+    if (EV(380, $s)) {
       $h.push("<div");
       $h.push(" class=\"");
       $h.push(ESC("btn"));
@@ -13162,7 +13199,7 @@ window.renderStage = function (data) {
     $h.push("</div>");
     $h.push("</div>");
   }
-  if (EV(382, $s)) {
+  if (EV(381, $s)) {
     $h.push("<div");
     $h.push(" class=\"");
     $h.push(ESC("overlay overlay-top"));
@@ -13192,7 +13229,7 @@ window.renderStage = function (data) {
     $h.push(ESC("dialog-sub"));
     $h.push("\"");
     $h.push(">");
-    $h.push(ESC(EV(383, $s)));
+    $h.push(ESC(EV(382, $s)));
     $h.push(" 位好友 · ");
     $h.push(ESC(EV(217, $s)));
     $h.push(" 人在线");
@@ -13208,7 +13245,7 @@ window.renderStage = function (data) {
     $h.push(ESC("friends-input"));
     $h.push("\"");
     $h.push(" value=\"");
-    $h.push(ESC(String(EV(384, $s))));
+    $h.push(ESC(String(EV(383, $s))));
     $h.push("\"");
     $h.push(" placeholder=\"");
     $h.push(ESC("输入好友的账号 ID"));
@@ -13228,7 +13265,7 @@ window.renderStage = function (data) {
     $h.push("查找");
     $h.push("</div>");
     $h.push("</div>");
-    if (EV(385, $s)) {
+    if (EV(384, $s)) {
       $h.push("<div");
       $h.push(" class=\"");
       $h.push(ESC("friends-found"));
@@ -13239,16 +13276,16 @@ window.renderStage = function (data) {
       $h.push(ESC("friends-avatar"));
       $h.push("\"");
       $h.push(" style=\"");
-      $h.push(ESC(String(EV(386, $s))));
+      $h.push(ESC(String(EV(385, $s))));
       $h.push("\"");
       $h.push(">");
-      if (EV(387, $s)) {
+      if (EV(386, $s)) {
         $h.push("<text");
         $h.push(" class=\"");
         $h.push(ESC("friends-avatar-initial"));
         $h.push("\"");
         $h.push(">");
-        $h.push(ESC(EV(388, $s)));
+        $h.push(ESC(EV(387, $s)));
         $h.push("</text>");
       }
       $h.push("</div>");
@@ -13257,7 +13294,7 @@ window.renderStage = function (data) {
       $h.push(ESC("friends-found-name"));
       $h.push("\"");
       $h.push(">");
-      $h.push(ESC(EV(389, $s)));
+      $h.push(ESC(EV(388, $s)));
       $h.push("</text>");
       $h.push("<div");
       $h.push(" class=\"");
@@ -13269,13 +13306,13 @@ window.renderStage = function (data) {
       $h.push("</div>");
       $h.push("</div>");
     }
-    if (EV(390, $s)) {
+    if (EV(389, $s)) {
       $h.push("<text");
       $h.push(" class=\"");
       $h.push(ESC("friends-notice"));
       $h.push("\"");
       $h.push(">");
-      $h.push(ESC(EV(390, $s)));
+      $h.push(ESC(EV(389, $s)));
       $h.push("</text>");
     }
     $h.push("<div");
@@ -13283,7 +13320,7 @@ window.renderStage = function (data) {
     $h.push(ESC("friends-list"));
     $h.push("\"");
     $h.push(">");
-    var $list54 = EV(391, $s) || [];
+    var $list54 = EV(390, $s) || [];
     for (var $i54 = 0; $i54 < $list54.length; $i54++) {
       var $s54 = Object.create($s);
       $s54.item = $list54[$i54];
@@ -13295,13 +13332,13 @@ window.renderStage = function (data) {
       $h.push(">");
       $h.push("<div");
       $h.push(" class=\"");
-      $h.push(ESC(("friends-avatar " + String(EV(392, $s54)))));
+      $h.push(ESC(("friends-avatar " + String(EV(391, $s54)))));
       $h.push("\"");
       $h.push(" style=\"");
-      $h.push(ESC(String(EV(393, $s54))));
+      $h.push(ESC(String(EV(392, $s54))));
       $h.push("\"");
       $h.push(">");
-      if (EV(394, $s54)) {
+      if (EV(393, $s54)) {
         $h.push("<text");
         $h.push(" class=\"");
         $h.push(ESC("friends-avatar-initial"));
@@ -13321,7 +13358,7 @@ window.renderStage = function (data) {
       $h.push(ESC("friends-name"));
       $h.push("\"");
       $h.push(">");
-      $h.push(ESC(EV(395, $s54)));
+      $h.push(ESC(EV(394, $s54)));
       $h.push("</text>");
       $h.push("<div");
       $h.push(" class=\"");
@@ -13330,7 +13367,7 @@ window.renderStage = function (data) {
       $h.push(">");
       $h.push("<div");
       $h.push(" class=\"");
-      $h.push(ESC(("friends-dot " + String(EV(392, $s54)))));
+      $h.push(ESC(("friends-dot " + String(EV(391, $s54)))));
       $h.push("\"");
       $h.push(">");
       $h.push("</div>");
@@ -13339,7 +13376,7 @@ window.renderStage = function (data) {
       $h.push(ESC("friends-status"));
       $h.push("\"");
       $h.push(">");
-      $h.push(ESC(EV(396, $s54)));
+      $h.push(ESC(EV(395, $s54)));
       $h.push("</text>");
       $h.push("<text");
       $h.push(" class=\"");
@@ -13347,24 +13384,24 @@ window.renderStage = function (data) {
       $h.push("\"");
       $h.push(">");
       $h.push("· ID ");
-      $h.push(ESC(EV(397, $s54)));
+      $h.push(ESC(EV(396, $s54)));
       $h.push("</text>");
       $h.push("</div>");
       $h.push("</div>");
-      if (EV(398, $s54)) {
+      if (EV(397, $s54)) {
         $h.push("<div");
         $h.push(" class=\"");
         $h.push(ESC("btn btn-primary friends-invite"));
         $h.push("\"");
         $h.push(" data-tap=\"onInviteFriend\"");
         $h.push(" data-uid=\"");
-        $h.push(ESC(String(EV(399, $s54))));
+        $h.push(ESC(String(EV(398, $s54))));
         $h.push("\"");
         $h.push(">");
         $h.push("邀请");
         $h.push("</div>");
       }
-      if (EV(400, $s54)) {
+      if (EV(399, $s54)) {
         $h.push("<text");
         $h.push(" class=\"");
         $h.push(ESC("friends-invite-hint"));
@@ -13373,7 +13410,7 @@ window.renderStage = function (data) {
         $h.push("房间里可邀请");
         $h.push("</text>");
       }
-      if (EV(401, $s54)) {
+      if (EV(400, $s54)) {
         $h.push("<text");
         $h.push(" class=\"");
         $h.push(ESC("friends-invite-hint"));
@@ -13388,26 +13425,26 @@ window.renderStage = function (data) {
       $h.push("\"");
       $h.push(" data-tap=\"onRemoveFriend\"");
       $h.push(" data-uid=\"");
-      $h.push(ESC(String(EV(399, $s54))));
+      $h.push(ESC(String(EV(398, $s54))));
       $h.push("\"");
       $h.push(">");
       $h.push("删");
       $h.push("</div>");
       $h.push("</div>");
     }
-    if (EV(402, $s)) {
+    if (EV(401, $s)) {
       $h.push("<div");
       $h.push(" class=\"");
       $h.push(ESC("friends-empty"));
       $h.push("\"");
       $h.push(">");
-      if (EV(403, $s)) {
+      if (EV(402, $s)) {
         $h.push("<text");
         $h.push(">");
         $h.push("正在加载好友…");
         $h.push("</text>");
       }
-      if (EV(404, $s)) {
+      if (EV(403, $s)) {
         $h.push("<text");
         $h.push(">");
         $h.push("还没有好友。把下面这串 ID 发给朋友，让他输入后互加。");
@@ -13433,7 +13470,7 @@ window.renderStage = function (data) {
     $h.push(ESC("friends-myid-value"));
     $h.push("\"");
     $h.push(">");
-    $h.push(ESC(EV(405, $s)));
+    $h.push(ESC(EV(404, $s)));
     $h.push("</text>");
     $h.push("<div");
     $h.push(" class=\"");
@@ -13461,7 +13498,7 @@ window.renderStage = function (data) {
     $h.push("</div>");
     $h.push("</div>");
   }
-  if (EV(406, $s)) {
+  if (EV(405, $s)) {
     $h.push("<div");
     $h.push(" class=\"");
     $h.push(ESC("invite-toast"));
@@ -13484,7 +13521,7 @@ window.renderStage = function (data) {
     $h.push(ESC("invite-toast-title"));
     $h.push("\"");
     $h.push(">");
-    $h.push(ESC(EV(407, $s)));
+    $h.push(ESC(EV(406, $s)));
     $h.push(" 邀请你联机");
     $h.push("</text>");
     $h.push("</div>");
@@ -13494,9 +13531,9 @@ window.renderStage = function (data) {
     $h.push("\"");
     $h.push(">");
     $h.push("房间号 ");
-    $h.push(ESC(EV(408, $s)));
+    $h.push(ESC(EV(407, $s)));
     $h.push(" · ");
-    $h.push(ESC(EV(409, $s)));
+    $h.push(ESC(EV(408, $s)));
     $h.push("</text>");
     $h.push("<div");
     $h.push(" class=\"");
@@ -13522,7 +13559,7 @@ window.renderStage = function (data) {
     $h.push("</div>");
     $h.push("</div>");
   }
-  if (EV(410, $s)) {
+  if (EV(409, $s)) {
     $h.push("<div");
     $h.push(" class=\"");
     $h.push(ESC("overlay"));
@@ -13570,9 +13607,9 @@ window.renderStage = function (data) {
     $h.push(ESC("leaderboard-source"));
     $h.push("\"");
     $h.push(">");
-    $h.push(ESC(EV(411, $s)));
+    $h.push(ESC(EV(410, $s)));
     $h.push("</text>");
-    if (EV(412, $s)) {
+    if (EV(411, $s)) {
       $h.push("<div");
       $h.push(" class=\"");
       $h.push(ESC("leaderboard-login-hint"));
@@ -13598,23 +13635,23 @@ window.renderStage = function (data) {
       $h.push("</text>");
       $h.push("</div>");
     }
-    if (EV(413, $s)) {
+    if (EV(412, $s)) {
       $h.push("<text");
       $h.push(" class=\"");
       $h.push(ESC("leaderboard-my"));
       $h.push("\"");
       $h.push(">");
       $h.push("我的排名 ");
-      $h.push(ESC(EV(414, $s)));
+      $h.push(ESC(EV(413, $s)));
       $h.push("</text>");
     }
-    if (EV(415, $s)) {
+    if (EV(414, $s)) {
       $h.push("<text");
       $h.push(" class=\"");
       $h.push(ESC("leaderboard-provisional"));
       $h.push("\"");
       $h.push(">");
-      $h.push(ESC(EV(416, $s)));
+      $h.push(ESC(EV(415, $s)));
       $h.push("</text>");
     }
     $h.push("</div>");
@@ -13697,20 +13734,20 @@ window.renderStage = function (data) {
     $h.push("回合平均耗时");
     $h.push("</text>");
     $h.push("</div>");
-    var $list55 = EV(417, $s) || [];
+    var $list55 = EV(416, $s) || [];
     for (var $i55 = 0; $i55 < $list55.length; $i55++) {
       var $s55 = Object.create($s);
       $s55.item = $list55[$i55];
       $s55.index = $i55;
       $h.push("<div");
       $h.push(" class=\"");
-      $h.push(ESC(("leaderboard-row " + String(EV(321, $s55)) + " " + String(EV(418, $s55)) + " " + String(EV(419, $s55)))));
+      $h.push(ESC(("leaderboard-row " + String(EV(321, $s55)) + " " + String(EV(417, $s55)) + " " + String(EV(418, $s55)))));
       $h.push("\"");
       $h.push(">");
-      if (EV(420, $s55)) {
+      if (EV(419, $s55)) {
         $h.push("<div");
         $h.push(" class=\"");
-        $h.push(ESC(("lb-section-head is-" + String(EV(421, $s55)))));
+        $h.push(ESC(("lb-section-head is-" + String(EV(420, $s55)))));
         $h.push("\"");
         $h.push(">");
         $h.push("<text");
@@ -13718,28 +13755,28 @@ window.renderStage = function (data) {
         $h.push(ESC("lb-section-title"));
         $h.push("\"");
         $h.push(">");
-        $h.push(ESC(EV(420, $s55)));
+        $h.push(ESC(EV(419, $s55)));
         $h.push("</text>");
         $h.push("<text");
         $h.push(" class=\"");
         $h.push(ESC("lb-section-sub"));
         $h.push("\"");
         $h.push(">");
-        $h.push(ESC(EV(422, $s55)));
+        $h.push(ESC(EV(421, $s55)));
         $h.push("</text>");
         $h.push("</div>");
       }
       $h.push("<div");
       $h.push(" class=\"");
-      $h.push(ESC(("lb-row-inner " + String(EV(423, $s55)))));
+      $h.push(ESC(("lb-row-inner " + String(EV(422, $s55)))));
       $h.push("\"");
       $h.push(">");
       $h.push("<div");
       $h.push(" class=\"");
-      $h.push(ESC(("lb-c-rank " + String(EV(418, $s55)))));
+      $h.push(ESC(("lb-c-rank " + String(EV(417, $s55)))));
       $h.push("\"");
       $h.push(">");
-      if (EV(424, $s55)) {
+      if (EV(423, $s55)) {
         $h.push("<div");
         $h.push(" class=\"");
         $h.push(ESC("lb-c-rank-medal"));
@@ -13749,7 +13786,7 @@ window.renderStage = function (data) {
       }
       $h.push("<text");
       $h.push(" class=\"");
-      $h.push(ESC(("lb-c-rank-num " + String(EV(418, $s55)))));
+      $h.push(ESC(("lb-c-rank-num " + String(EV(417, $s55)))));
       $h.push("\"");
       $h.push(">");
       $h.push(ESC(EV(302, $s55)));
@@ -13760,7 +13797,7 @@ window.renderStage = function (data) {
       $h.push(ESC("lb-c-name"));
       $h.push("\"");
       $h.push(">");
-      if (EV(424, $s55)) {
+      if (EV(423, $s55)) {
         $h.push("<div");
         $h.push(" class=\"");
         $h.push(ESC("lb-avatar-crown"));
@@ -13788,7 +13825,7 @@ window.renderStage = function (data) {
           $h.push(">");
           $h.push("</img>");
         }
-        if (EV(394, $s55)) {
+        if (EV(393, $s55)) {
           $h.push("<text");
           $h.push(">");
           $h.push(ESC(EV(14, $s55)));
@@ -13813,7 +13850,7 @@ window.renderStage = function (data) {
         $h.push("</div>");
         $h.push("</div>");
       }
-      if (EV(425, $s55)) {
+      if (EV(424, $s55)) {
         $h.push("<div");
         $h.push(" class=\"");
         $h.push(ESC("lb-avatar"));
@@ -13830,7 +13867,7 @@ window.renderStage = function (data) {
         $h.push("</img>");
         $h.push("</div>");
       }
-      if (EV(426, $s55)) {
+      if (EV(425, $s55)) {
         $h.push("<div");
         $h.push(" class=\"");
         $h.push(ESC("lb-avatar is-preset"));
@@ -13844,12 +13881,12 @@ window.renderStage = function (data) {
       }
       $h.push("<text");
       $h.push(" class=\"");
-      $h.push(ESC(("lb-name " + String(EV(418, $s55)))));
+      $h.push(ESC(("lb-name " + String(EV(417, $s55)))));
       $h.push("\"");
       $h.push(">");
       $h.push(ESC(EV(17, $s55)));
       $h.push("</text>");
-      if (EV(424, $s55)) {
+      if (EV(423, $s55)) {
         $h.push("<text");
         $h.push(" class=\"");
         $h.push(ESC("lb-champion"));
@@ -13867,7 +13904,7 @@ window.renderStage = function (data) {
         $h.push("你");
         $h.push("</text>");
       }
-      if (EV(427, $s55)) {
+      if (EV(426, $s55)) {
         $h.push("<text");
         $h.push(" class=\"");
         $h.push(ESC("lb-provisional"));
@@ -13882,11 +13919,18 @@ window.renderStage = function (data) {
       $h.push(ESC("lb-c-num is-score"));
       $h.push("\"");
       $h.push(">");
-      $h.push(ESC(EV(428, $s55)));
+      $h.push(ESC(EV(427, $s55)));
       $h.push("</text>");
       $h.push("<text");
       $h.push(" class=\"");
-      $h.push(ESC(("lb-c-num lb-c-rate " + String(EV(429, $s55)))));
+      $h.push(ESC(("lb-c-num lb-c-rate " + String(EV(428, $s55)))));
+      $h.push("\"");
+      $h.push(">");
+      $h.push(ESC(EV(429, $s55)));
+      $h.push("</text>");
+      $h.push("<text");
+      $h.push(" class=\"");
+      $h.push(ESC("lb-c-num"));
       $h.push("\"");
       $h.push(">");
       $h.push(ESC(EV(430, $s55)));
@@ -13919,17 +13963,10 @@ window.renderStage = function (data) {
       $h.push(">");
       $h.push(ESC(EV(434, $s55)));
       $h.push("</text>");
-      $h.push("<text");
-      $h.push(" class=\"");
-      $h.push(ESC("lb-c-num"));
-      $h.push("\"");
-      $h.push(">");
-      $h.push(ESC(EV(435, $s55)));
-      $h.push("</text>");
       $h.push("</div>");
       $h.push("</div>");
     }
-    if (EV(436, $s)) {
+    if (EV(435, $s)) {
       $h.push("<div");
       $h.push(" class=\"");
       $h.push(ESC("leaderboard-empty"));
@@ -13943,7 +13980,7 @@ window.renderStage = function (data) {
     }
     $h.push("</div>");
     $h.push("</div>");
-    if (EV(437, $s)) {
+    if (EV(436, $s)) {
       $h.push("<div");
       $h.push(" class=\"");
       $h.push(ESC("leaderboard-scroll-hint"));
@@ -13960,7 +13997,7 @@ window.renderStage = function (data) {
     $h.push(ESC("leaderboard-formula"));
     $h.push("\"");
     $h.push(">");
-    $h.push(ESC(EV(438, $s)));
+    $h.push(ESC(EV(437, $s)));
     $h.push("</text>");
     $h.push("<text");
     $h.push(" class=\"");
@@ -14566,7 +14603,8 @@ function seatVM(state, index, room, selfSeat, avatars) {
   const avatar = p.avatar || s.avatar || 'a0';
   const isSelf = index === (selfSeat || 0);
   const type = p.type || (p.isAI ? 'bot' : 'human');
-  const seatNo = index + 1;
+  // 号位从本局 1 号位锚点起顺延，不是建房时的数组下标（见 E.seatNoOf）
+  const seatNo = E.seatNoOf(state, index);
   const name = displayName(p, '玩家 ' + seatNo);
   const isCurrent = state.current === index && !state.gameOver;
   return {
@@ -14586,8 +14624,8 @@ function seatVM(state, index, room, selfSeat, avatars) {
     isCurrent: isCurrent,
     // 「行动中」文字与青色边框同时表达，只靠边框在小屏上会被误读成选中态
     turnTag: isCurrent ? '行动中' : '',
-    // 起始玩家（0 号位）与当前行动者是两种身份，用不同标记区分
-    isFirst: index === 0,
+    // 起始玩家（本局 1 号位）与当前行动者是两种身份，用不同标记区分
+    isFirst: index === (Number(state.startSeat) || 0),
     joined: p.joined,
     empty: !p.joined && !p.isAI,
     points: p.points,
@@ -14793,11 +14831,12 @@ function chatTargetsVM(state, mySeat, avatars) {
   const out = [];
   for (let i = 0; i < state.players.length; i++) {
     const p = state.players[i] || {};
-    const name = String(displayName(p, '玩家 ' + (i + 1))).slice(0, 8);
+    const seatNo = E.seatNoOf(state, i);
+    const name = String(displayName(p, '玩家 ' + seatNo)).slice(0, 8);
     out.push({
       seat: i,
-      seatLabel: (i + 1) + ' 号位',
-      seatSub: (i + 1) + ' 号位' + (p.isAI ? ' · 机器人' : '') + (i === mySeat ? ' · 我' : ''),
+      seatLabel: seatNo + ' 号位',
+      seatSub: seatNo + ' 号位' + (p.isAI ? ' · 机器人' : '') + (i === mySeat ? ' · 我' : ''),
       name: name,
       initial: name.slice(0, 1),
       isSelf: i === mySeat,
@@ -15559,7 +15598,7 @@ function buildViewModel(state, ui, layout, ctx) {
   let nobleChoice = null;
   if (state.pendingNoble && !state.gameOver) {
     const pn = state.pendingNoble;
-    const pnSeat = pn.seat + 1;
+    const pnSeat = E.seatNoOf(state, pn.seat);
     const pnActor = state.players[pn.seat] || {};
     const options = [];
     for (let oi = 0; oi < pn.options.length; oi++) {
@@ -15614,7 +15653,7 @@ function buildViewModel(state, ui, layout, ctx) {
   // 四种上下文都要有话说，不能出现空行导致按钮上下跳动
   let pickHint;
   if (!isMyTurn) {
-    pickHint = '等待 ' + (state.current + 1) + ' 号位行动 · 可查看牌面与库存';
+    pickHint = '等待 ' + E.seatNoOf(state, state.current) + ' 号位行动 · 可查看牌面与库存';
   } else if (needDiscard) {
     // 官方规则允许退同色多枚，文案必须说清「可重复点」，否则玩家会以为点第二次是撤回
     pickHint = '点自己的筹码加入退还（同色可重复点），攒够 ' + state.pendingDiscard + ' 枚再确认；点「−」撤回';
@@ -15644,10 +15683,10 @@ function buildViewModel(state, ui, layout, ctx) {
   else if (state.pendingNoble) {
     statusText = state.pendingNoble.seat === seat
       ? '请挑选 1 张贵族'
-      : (state.pendingNoble.seat + 1) + ' 号位 · 正在挑选贵族';
+      : E.seatNoOf(state, state.pendingNoble.seat) + ' 号位 · 正在挑选贵族';
   } else if (needDiscard) statusText = '请退还筹码';
-  else if (isMyTurn) statusText = '你的回合 · ' + (seat + 1) + ' 号位';
-  else statusText = (state.current + 1) + ' 号位 · ' +
+  else if (isMyTurn) statusText = '你的回合 · ' + E.seatNoOf(state, seat) + ' 号位';
+  else statusText = E.seatNoOf(state, state.current) + ' 号位 · ' +
     (state.players[state.current].nickname || state.players[state.current].name) + ' 的回合';
 
   let resultTitle = '';
@@ -15667,9 +15706,11 @@ function buildViewModel(state, ui, layout, ctx) {
       for (let k = 0; k < p.cards.length; k++) cardPts += p.cards[k].points;
       let noblePts = 0;
       for (let k = 0; k < p.nobles.length; k++) noblePts += p.nobles[k].points;
+      const seatNo = E.seatNoOf(state, i);
       return {
         seat: i,
-        name: displayName(p, '玩家 ' + (i + 1)),
+        seatLabel: seatNo + ' 号位',
+        name: displayName(p, '玩家 ' + seatNo),
         initial: String(displayName(p, '玩')).slice(0, 1),
         avatarHue: avatarHue(p.avatar || 'a0'),
         avatarUrl: (p.uid && avatars && avatars[p.uid]) || '',
@@ -15722,7 +15763,7 @@ function buildViewModel(state, ui, layout, ctx) {
     }
     const lp = leader === null ? null : state.players[leader];
     endNotice = {
-      leaderSeat: (leader === null ? 0 : leader) + 1,
+      leaderSeat: E.seatNoOf(state, leader === null ? 0 : leader),
       leaderName: lp ? (lp.nickname || lp.name) : '',
       leftText: left > 0 ? ('还剩 ' + left + ' 个回合') : '本轮即将结算'
     };
@@ -15739,7 +15780,10 @@ function buildViewModel(state, ui, layout, ctx) {
       const vm = C.chatVM(ui.chatMessages, seat, Date.now(), ui.chatPanelOpen, ui.chatTab, {
         pendingEmoji: ui.chatPendingEmoji || null,
         targets: chatTargetsVM(state, seat, avatars),
-        projectiles: ui.chatProjectiles || []
+        projectiles: ui.chatProjectiles || [],
+        // 气泡 / 定向表情的号位必须跟牌桌同一套编号
+        seatStart: Number(state.startSeat) || 0,
+        playerCount: state.players.length
       });
       vm.fly = ui.chatFly || null;
       // 用 wx:for + wx:key 承载大表情：连续发两个表情时节点会随 id 重建，
@@ -15864,8 +15908,8 @@ function buildViewModel(state, ui, layout, ctx) {
     turnFlash: ui.turnFlash || null,
     turnClock: clockVM(state, ui),
     nobleChoice: nobleChoice,
-    meSeatNo: seat + 1,
-    meSeatLabel: (seat + 1) + ' 号位'
+    meSeatNo: E.seatNoOf(state, seat),
+    meSeatLabel: E.seatNoOf(state, seat) + ' 号位'
   };
 }
 
@@ -16518,7 +16562,7 @@ Page({
     this.ui.chatPendingEmoji = null;
     this.ui.chatPanelOpen = false;
     this.showChatProjectile(msg);
-    this.refresh('已向 ' + (seat + 1) + ' 号位' + pending.label);
+    this.refresh('已向 ' + E.seatNoOf(this.state, seat) + ' 号位' + pending.label);
   },
 
   /**
@@ -16542,6 +16586,7 @@ Page({
   showChatProjectile(msg) {
     if (!msg || msg.kind !== 'emoji' || !this.ui) return;
     const players = (this.state && this.state.players) || [];
+    const st = this.state || { players: players };
     const from = this.chatSeatAnchor(msg.seat);
     const target = (typeof msg.targetSeat === 'number' && msg.targetSeat >= 0 &&
       msg.targetSeat < players.length) ? msg.targetSeat : msg.seat;
@@ -16549,7 +16594,7 @@ Page({
     const aim = C.aimFor(msg.tone || '');
     const nameOf = function (s) {
       const p = players[s] || {};
-      return String(displayName(p, (s + 1) + ' 号位')).slice(0, 8);
+      return String(displayName(p, E.seatNoOf(st, s) + ' 号位')).slice(0, 8);
     };
     const item = {
       id: C.makeId(),
@@ -16641,7 +16686,7 @@ Page({
       if (!that.ui || that.ui.screen !== 'game' || !that.state) return;
       const p = that.state.players[seat] || {};
       const msg = C.makeMessage(that.chatRoomCode(), seat, '',
-        displayName(p, (seat + 1) + ' 号位'), 'emoji', preset,
+        displayName(p, E.seatNoOf(that.state, seat) + ' 号位'), 'emoji', preset,
         Date.now(), that.mySeat || 0);
       that.pushChatMessage(msg, false);       // 本地即可，别再触发机器人自回复
       // 只回气泡，不调 showChatFly：大表情是玩家主动打出的全屏效果，动画 1600ms，
@@ -16780,7 +16825,7 @@ Page({
     const isRoom = this.mode === 'room';
     if (!mine && !isRoom) { this.ui.turnFlash = null; return; }
     const p = state.players[state.current] || {};
-    const seatNo = state.current + 1;
+    const seatNo = E.seatNoOf(state, state.current);
     const name = displayName(p, '玩家 ' + seatNo);
     const limitText = limit > 0 ? '限时 ' + limit + ' 秒' : '不限时';
     this.ui.turnFlash = {
@@ -18364,8 +18409,9 @@ Page({
     const seats = (this.room.seats || []).map(function (s, i) {
       return Object.assign({}, s, { index: i, ready: true });
     });
-    // 先手随机：联机局不再固定房主 0 号先动，否则后加入的人永远后手。
-    // 结果写进 state 随快照下发，其他端直接读 current，不各自抽签。
+    // 随机抽出本局 1 号位：联机局不再固定房主 0 号先动，否则后加入的人永远后手。
+    // 抽中的人即 1 号位，号位沿座次顺延编号，行动恒从 1 号位起、到末位号位收尾结算。
+    // 锚点写进 state 随快照下发，其他端直接读 startSeat / current，不各自抽签。
     this.state = E.createGame({
       playerCount: seats.length,
       seats: seats,

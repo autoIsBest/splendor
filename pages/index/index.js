@@ -563,7 +563,8 @@ function seatVM(state, index, room, selfSeat, avatars) {
   const avatar = p.avatar || s.avatar || 'a0';
   const isSelf = index === (selfSeat || 0);
   const type = p.type || (p.isAI ? 'bot' : 'human');
-  const seatNo = index + 1;
+  // 号位从本局 1 号位锚点起顺延，不是建房时的数组下标（见 E.seatNoOf）
+  const seatNo = E.seatNoOf(state, index);
   const name = displayName(p, '玩家 ' + seatNo);
   const isCurrent = state.current === index && !state.gameOver;
   return {
@@ -583,8 +584,8 @@ function seatVM(state, index, room, selfSeat, avatars) {
     isCurrent: isCurrent,
     // 「行动中」文字与青色边框同时表达，只靠边框在小屏上会被误读成选中态
     turnTag: isCurrent ? '行动中' : '',
-    // 起始玩家（0 号位）与当前行动者是两种身份，用不同标记区分
-    isFirst: index === 0,
+    // 起始玩家（本局 1 号位）与当前行动者是两种身份，用不同标记区分
+    isFirst: index === (Number(state.startSeat) || 0),
     joined: p.joined,
     empty: !p.joined && !p.isAI,
     points: p.points,
@@ -790,11 +791,12 @@ function chatTargetsVM(state, mySeat, avatars) {
   const out = [];
   for (let i = 0; i < state.players.length; i++) {
     const p = state.players[i] || {};
-    const name = String(displayName(p, '玩家 ' + (i + 1))).slice(0, 8);
+    const seatNo = E.seatNoOf(state, i);
+    const name = String(displayName(p, '玩家 ' + seatNo)).slice(0, 8);
     out.push({
       seat: i,
-      seatLabel: (i + 1) + ' 号位',
-      seatSub: (i + 1) + ' 号位' + (p.isAI ? ' · 机器人' : '') + (i === mySeat ? ' · 我' : ''),
+      seatLabel: seatNo + ' 号位',
+      seatSub: seatNo + ' 号位' + (p.isAI ? ' · 机器人' : '') + (i === mySeat ? ' · 我' : ''),
       name: name,
       initial: name.slice(0, 1),
       isSelf: i === mySeat,
@@ -1556,7 +1558,7 @@ function buildViewModel(state, ui, layout, ctx) {
   let nobleChoice = null;
   if (state.pendingNoble && !state.gameOver) {
     const pn = state.pendingNoble;
-    const pnSeat = pn.seat + 1;
+    const pnSeat = E.seatNoOf(state, pn.seat);
     const pnActor = state.players[pn.seat] || {};
     const options = [];
     for (let oi = 0; oi < pn.options.length; oi++) {
@@ -1611,7 +1613,7 @@ function buildViewModel(state, ui, layout, ctx) {
   // 四种上下文都要有话说，不能出现空行导致按钮上下跳动
   let pickHint;
   if (!isMyTurn) {
-    pickHint = '等待 ' + (state.current + 1) + ' 号位行动 · 可查看牌面与库存';
+    pickHint = '等待 ' + E.seatNoOf(state, state.current) + ' 号位行动 · 可查看牌面与库存';
   } else if (needDiscard) {
     // 官方规则允许退同色多枚，文案必须说清「可重复点」，否则玩家会以为点第二次是撤回
     pickHint = '点自己的筹码加入退还（同色可重复点），攒够 ' + state.pendingDiscard + ' 枚再确认；点「−」撤回';
@@ -1641,10 +1643,10 @@ function buildViewModel(state, ui, layout, ctx) {
   else if (state.pendingNoble) {
     statusText = state.pendingNoble.seat === seat
       ? '请挑选 1 张贵族'
-      : (state.pendingNoble.seat + 1) + ' 号位 · 正在挑选贵族';
+      : E.seatNoOf(state, state.pendingNoble.seat) + ' 号位 · 正在挑选贵族';
   } else if (needDiscard) statusText = '请退还筹码';
-  else if (isMyTurn) statusText = '你的回合 · ' + (seat + 1) + ' 号位';
-  else statusText = (state.current + 1) + ' 号位 · ' +
+  else if (isMyTurn) statusText = '你的回合 · ' + E.seatNoOf(state, seat) + ' 号位';
+  else statusText = E.seatNoOf(state, state.current) + ' 号位 · ' +
     (state.players[state.current].nickname || state.players[state.current].name) + ' 的回合';
 
   let resultTitle = '';
@@ -1664,9 +1666,11 @@ function buildViewModel(state, ui, layout, ctx) {
       for (let k = 0; k < p.cards.length; k++) cardPts += p.cards[k].points;
       let noblePts = 0;
       for (let k = 0; k < p.nobles.length; k++) noblePts += p.nobles[k].points;
+      const seatNo = E.seatNoOf(state, i);
       return {
         seat: i,
-        name: displayName(p, '玩家 ' + (i + 1)),
+        seatLabel: seatNo + ' 号位',
+        name: displayName(p, '玩家 ' + seatNo),
         initial: String(displayName(p, '玩')).slice(0, 1),
         avatarHue: avatarHue(p.avatar || 'a0'),
         avatarUrl: (p.uid && avatars && avatars[p.uid]) || '',
@@ -1719,7 +1723,7 @@ function buildViewModel(state, ui, layout, ctx) {
     }
     const lp = leader === null ? null : state.players[leader];
     endNotice = {
-      leaderSeat: (leader === null ? 0 : leader) + 1,
+      leaderSeat: E.seatNoOf(state, leader === null ? 0 : leader),
       leaderName: lp ? (lp.nickname || lp.name) : '',
       leftText: left > 0 ? ('还剩 ' + left + ' 个回合') : '本轮即将结算'
     };
@@ -1736,7 +1740,10 @@ function buildViewModel(state, ui, layout, ctx) {
       const vm = C.chatVM(ui.chatMessages, seat, Date.now(), ui.chatPanelOpen, ui.chatTab, {
         pendingEmoji: ui.chatPendingEmoji || null,
         targets: chatTargetsVM(state, seat, avatars),
-        projectiles: ui.chatProjectiles || []
+        projectiles: ui.chatProjectiles || [],
+        // 气泡 / 定向表情的号位必须跟牌桌同一套编号
+        seatStart: Number(state.startSeat) || 0,
+        playerCount: state.players.length
       });
       vm.fly = ui.chatFly || null;
       // 用 wx:for + wx:key 承载大表情：连续发两个表情时节点会随 id 重建，
@@ -1861,8 +1868,8 @@ function buildViewModel(state, ui, layout, ctx) {
     turnFlash: ui.turnFlash || null,
     turnClock: clockVM(state, ui),
     nobleChoice: nobleChoice,
-    meSeatNo: seat + 1,
-    meSeatLabel: (seat + 1) + ' 号位'
+    meSeatNo: E.seatNoOf(state, seat),
+    meSeatLabel: E.seatNoOf(state, seat) + ' 号位'
   };
 }
 
@@ -2515,7 +2522,7 @@ Page({
     this.ui.chatPendingEmoji = null;
     this.ui.chatPanelOpen = false;
     this.showChatProjectile(msg);
-    this.refresh('已向 ' + (seat + 1) + ' 号位' + pending.label);
+    this.refresh('已向 ' + E.seatNoOf(this.state, seat) + ' 号位' + pending.label);
   },
 
   /**
@@ -2539,6 +2546,7 @@ Page({
   showChatProjectile(msg) {
     if (!msg || msg.kind !== 'emoji' || !this.ui) return;
     const players = (this.state && this.state.players) || [];
+    const st = this.state || { players: players };
     const from = this.chatSeatAnchor(msg.seat);
     const target = (typeof msg.targetSeat === 'number' && msg.targetSeat >= 0 &&
       msg.targetSeat < players.length) ? msg.targetSeat : msg.seat;
@@ -2546,7 +2554,7 @@ Page({
     const aim = C.aimFor(msg.tone || '');
     const nameOf = function (s) {
       const p = players[s] || {};
-      return String(displayName(p, (s + 1) + ' 号位')).slice(0, 8);
+      return String(displayName(p, E.seatNoOf(st, s) + ' 号位')).slice(0, 8);
     };
     const item = {
       id: C.makeId(),
@@ -2638,7 +2646,7 @@ Page({
       if (!that.ui || that.ui.screen !== 'game' || !that.state) return;
       const p = that.state.players[seat] || {};
       const msg = C.makeMessage(that.chatRoomCode(), seat, '',
-        displayName(p, (seat + 1) + ' 号位'), 'emoji', preset,
+        displayName(p, E.seatNoOf(that.state, seat) + ' 号位'), 'emoji', preset,
         Date.now(), that.mySeat || 0);
       that.pushChatMessage(msg, false);       // 本地即可，别再触发机器人自回复
       // 只回气泡，不调 showChatFly：大表情是玩家主动打出的全屏效果，动画 1600ms，
@@ -2777,7 +2785,7 @@ Page({
     const isRoom = this.mode === 'room';
     if (!mine && !isRoom) { this.ui.turnFlash = null; return; }
     const p = state.players[state.current] || {};
-    const seatNo = state.current + 1;
+    const seatNo = E.seatNoOf(state, state.current);
     const name = displayName(p, '玩家 ' + seatNo);
     const limitText = limit > 0 ? '限时 ' + limit + ' 秒' : '不限时';
     this.ui.turnFlash = {
@@ -4361,8 +4369,9 @@ Page({
     const seats = (this.room.seats || []).map(function (s, i) {
       return Object.assign({}, s, { index: i, ready: true });
     });
-    // 先手随机：联机局不再固定房主 0 号先动，否则后加入的人永远后手。
-    // 结果写进 state 随快照下发，其他端直接读 current，不各自抽签。
+    // 随机抽出本局 1 号位：联机局不再固定房主 0 号先动，否则后加入的人永远后手。
+    // 抽中的人即 1 号位，号位沿座次顺延编号，行动恒从 1 号位起、到末位号位收尾结算。
+    // 锚点写进 state 随快照下发，其他端直接读 startSeat / current，不各自抽签。
     this.state = E.createGame({
       playerCount: seats.length,
       seats: seats,

@@ -45,6 +45,24 @@ function pushLog(state, text) {
 }
 
 /**
+ * 席位索引 → 本局号位（1-based）。
+ * ------------------------------------------------------------------
+ * 号位不是建房时钉死的座位，而是从本局「1 号位」锚点起顺延编号：
+ * 锚点恒为 1 号位，沿数组索引循环，末位恒为 n 号位（4 人局即 4 号位）。
+ * 随机量只落在 startSeat 上（谁抽到 1 号位），players 数组与 uid 锚点不动，
+ * 重连、云端快照、房主权限仍按数组索引对齐。
+ *
+ * 老快照没有 startSeat 字段时回退 0，行为与改动前一致。
+ */
+function seatNoOf(state, index) {
+  const s = state || {};
+  const n = (s.players && s.players.length) || 1;
+  const start = Number(s.startSeat) || 0;
+  const i = Number(index) || 0;
+  return ((i - start) % n + n) % n + 1;
+}
+
+/**
  * 2 人局：每色 4 枚，黄金 5 枚；3 人 5 枚 / 4 人 7 枚
  * rand 可选：传入自定义随机源可复现牌序，便于调试与复盘
  */
@@ -55,8 +73,10 @@ function createGame(playerCount, rand) {
     ? playerCount : { playerCount: playerCount };
   const n = opt.playerCount || 2;
   const shuffleRand = rand || opt.rand || Math.random;
-  // 先手席位：联机局由房主随机后写进快照下发，人机局默认 0（本机先手）。
-  // 只改行动起点，不动 players 的排列 —— 席位索引是身份锚点，
+  // 本局「1 号位」锚点：联机局由房主随机抽出后写进快照下发，人机局默认 0。
+  // 号位编号从这个锚点起沿数组索引顺延：锚点恒为 1 号位、末位恒为 n 号位，
+  // 所以「从 1 号位开始」与「打完本轮到 4 号位结束」是同一套顺序，不会错位。
+  // 只改这个锚点，不动 players 排列 —— 席位索引是身份锚点，
   // 重连与云端快照都按它对齐，打乱会导致认错席位。
   const first = Math.floor(Number(opt.firstSeat) || 0);
   const startSeat = (first >= 0 && first < n) ? first : 0;
@@ -71,6 +91,8 @@ function createGame(playerCount, rand) {
     board: [[], [], []],
     nobles: [],
     current: startSeat,
+    // 本局 1 号位所在的数组索引。随快照下发，所有端按同一锚点渲染号位与结算终局。
+    startSeat: startSeat,
     turnCount: 0,
     endAtTurn: -1,
     gameOver: false,
@@ -256,10 +278,14 @@ function finishTurn(state) {
 
   if (state.endAtTurn < 0 && state.players[idx].points >= 15) {
     // 官方规则：有人达到 15 声望后，打完「本轮」再结算，让所有人的回合数相同。
-    // 本轮还剩几席 = 总人数 - 1 - 达标者的席位下标。
-    // 达标者若已是最后一号位，本轮已打完（rest=0），必须立即结算 —— 旧实现无条件
-    // 加 players.length-1 个回合，会轮转回 1 号位凭空多打一整轮。
-    const rest = state.players.length - 1 - idx;
+    // 本轮 = 从 1 号位走到末位号位，所以剩余席数要用达标者「相对 1 号位的位次」，
+    // 不能用数组下标 idx。1 号位由 startSeat 随机抽出，若仍按 idx 算，先手不是
+    // 索引 0 时末位会被误判成数组最后一位：达标后要么多打一整轮，要么少打一席。
+    // 达标者若已是末位号位，本轮已打完（rest=0），必须立即结算。
+    const n = state.players.length;
+    const start = Number(state.startSeat) || 0;
+    const pos = ((idx - start) % n + n) % n;
+    const rest = n - 1 - pos;
     state.endAtTurn = state.turnCount + rest;
     pushLog(state, rest > 0
       ? '有人达到 15 声望 · 本轮剩余 ' + rest + ' 席后结算'
@@ -556,6 +582,7 @@ function hasAnyAction(state) {
 
 module.exports = {
   createGame: createGame,
+  seatNoOf: seatNoOf,
   refill: refill,
   tokenTotal: tokenTotal,
   getDiscounts: getDiscounts,

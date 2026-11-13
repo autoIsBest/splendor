@@ -281,6 +281,57 @@ function endgameState(n, triggerSeat) {
 });
 console.log('终局判定：2/3/4 人局共 9 个席位达标场景全部正确');
 
+// 随机 1 号位下的终局：末位恒为 n 号位，末位达标立即结算
+// ------------------------------------------------------------------
+// 旧实现用「数组下标」算本轮剩余席数（rest = n - 1 - idx），只有 startSeat = 0
+// 时才成立。1 号位随机抽到别的索引后，末位会被误判成数组最后一位：
+// 有人达标后要么多打一整轮、要么少打一席。这里对
+// 2/3/4 人局 × 每个 1 号位锚点 × 每个触发席位做全枚举。
+function rotatedEndgameState(n, startSeat, triggerSeat) {
+  const s = E.createGame({ playerCount: n, firstSeat: startSeat, rand: D.mulberry32(7) });
+  s.current = triggerSeat;
+  s.turnCount = 10;
+  s.endAtTurn = -1;
+  s.nobles = [];                            // 避免多贵族挂起干扰回合推进
+  s.players[triggerSeat].cards = [{ points: 15 }];
+  s.players[triggerSeat].nobles = [];
+  return s;
+}
+let rotatedCases = 0;
+[2, 3, 4].forEach(function (n) {
+  for (let start = 0; start < n; start++) {
+    const lastSeat = (start - 1 + n) % n;  // n 号位（末位）所在的数组索引
+    assert(E.seatNoOf({ players: new Array(n), startSeat: start }, lastSeat) === n,
+      n + ' 人局 startSeat=' + start + ' 的末位应是 ' + n + ' 号位');
+    for (let seat = 0; seat < n; seat++) {
+      const s = rotatedEndgameState(n, start, seat);
+      const pos = (seat - start + n) % n;
+      const rest = n - 1 - pos;
+      const r = E.endTurn(s);
+      if (rest === 0) {
+        assert(seat === lastSeat, 'rest=0 只应发生在末位号位达标');
+        assert(s.gameOver === true,
+          n + ' 人局 startSeat=' + start + ' 末位(' + n + ' 号位)达标应立即结算');
+        assert(s.current === seat, '末位达标后不应再轮转回 1 号位');
+        assert(r.gameOver === true, '末位达标 endTurn 应返回 gameOver');
+      } else {
+        assert(s.gameOver === false,
+          n + ' 人局 startSeat=' + start + ' 索引 ' + seat + ' 达标不应立即结算');
+        assert(s.current === (seat + 1) % n, '达标后应沿座次轮转到下一席');
+        assert(s.endAtTurn === 11 + rest, '结算回合应为 turnCount + 本轮剩余席数');
+        let extra = 0;
+        while (!s.gameOver && extra < 10) { E.endTurn(s); extra += 1; }
+        assert(s.gameOver === true, n + ' 人局本轮走完应结算');
+        assert(extra === rest,
+          n + ' 人局 startSeat=' + start + ' 索引 ' + seat + ' 达标应再走 ' + rest + ' 席，实际 ' + extra);
+        assert(s.current === lastSeat, '结算应停在末位号位（' + n + ' 号位）');
+      }
+      rotatedCases += 1;
+    }
+  }
+});
+console.log('随机 1 号位终局：' + rotatedCases + ' 个「人数 × 锚点 × 触发席位」组合全部正确');
+
 // 多局 AI 自动对战（用可复现随机源覆盖不同牌序）
 let finished = 0, minSteps = Infinity, maxSteps = 0, totalSteps = 0, maxPoints = 0;
 let stalemates = 0;
