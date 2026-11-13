@@ -193,6 +193,15 @@ else ok('WXSS 大括号平衡');
   }
 }
 
+// 7.5 房主移出按钮：必须 catchtap，否则冒泡触发整张席位卡的 onRoomSeatTap
+if (/bindtap="onRoomKick"/.test(wxml)) {
+  fail('移出按钮必须用 catchtap，bindtap 会冒泡到席位卡触发准备 / 机器人切换');
+} else if (!/catchtap="onRoomKick"/.test(wxml)) {
+  fail('房间席位卡缺少房主「移出」按钮');
+} else {
+  ok('房主移出按钮使用 catchtap（不冒泡触发整卡）');
+}
+
 // 8. 本地引用检查（require 路径）
 const reqRe = /require\(['"]([^'"]+)['"]\)/g;
 let qm;

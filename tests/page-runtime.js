@@ -17,6 +17,18 @@ global.setTimeout = function (fn) {
 global.clearTimeout = function (id) {
   timers.forEach(function (t) { if (t.id === id) t.active = false; });
 };
+// 页面用 setInterval 做云端轮询 / 在线人数心跳。这里必须一起 mock：
+// 否则一旦某个断言失败、流程没走到 onUnload()，Node 真实的 interval
+// 会让进程永不退出（表现为测试「挂死」而不是打印 FAIL）。
+const intervals = [];
+global.setInterval = function (fn) {
+  const t = { id: nextTimerId++, fn: fn, active: true };
+  intervals.push(t);
+  return t.id;
+};
+global.clearInterval = function (id) {
+  intervals.forEach(function (t) { if (t.id === id) t.active = false; });
+};
 function drain(max) {
   let n = 0;
   while (n < max) {
@@ -1731,8 +1743,101 @@ console.log('OK  终局提示 · 指名达标者 / 剩余回合 / 结算后消�
         page._gameStartedAt = savedStarted;
         console.log('OK  一局一条 · 已结束快照不补记 / gameId 去重 / 伪耗时归零');
       }
-      page.onUnload();
-      console.log('ALL RUNTIME CHECKS PASSED');
+      /* ---------- 房主踢人：按钮门禁 / 席位释放 / 被踢感知 ---------- */
+      {
+        page.onLeaveRoom();
+        page.onCreateRoom();
+        assert(page.data.screen === 'room', '踢人专项：应进入房间界面');
+        page.room.seats[1] = Object.assign({}, page.room.seats[1], {
+          joined: true, uid: 'kick-runtime-guest', name: '群友丙', nickname: '群友丙', ready: false
+        });
+        page.refresh('');
+        assert(page.data.roomScreen.seats[1].canKick === true, '房主对已入席真人可移出');
+        assert(page.data.roomScreen.seats[0].canKick === false, '房主不能移出自己 / 0 号席');
+        assert(page.data.roomScreen.seats[2].canKick === false, '空席不显示移出按钮');
+        tap('onRoomToggleBot', { index: 2 });
+        assert(page.data.roomScreen.seats[2].canKick === false, '机器人席不显示移出按钮');
+        tap('onRoomToggleBot', { index: 2 });
+
+        // 非房主视角 / 对局态都不给按钮
+        page.mySeat = 2;
+        page.refresh('');
+        assert(page.data.roomScreen.seats.every(function (s) { return !s.canKick; }),
+          '非房主看不到任何移出按钮');
+        page.mySeat = 0;
+        page.room.status = 'playing';
+        page.refresh('');
+        assert(page.data.roomScreen.seats.every(function (s) { return !s.canKick; }),
+          '牌局进行中不显示移出按钮');
+        page.room.status = 'lobby';
+        page.refresh('');
+
+        // 点击移出：席位释放为空真人席，人数与空席数同步变化
+        tap('onRoomKick', { index: 1 });
+        const kickedSeat = page.room.seats[1];
+        assert(kickedSeat.uid === '' && kickedSeat.joined === false && kickedSeat.ready === false,
+          '移出后席位释放为空真人席');
+        assert(kickedSeat.isAI === false, '移出不自动补机器人');
+        assert(page.data.roomScreen.joinedHumans === 1, '人数回到只有房主');
+        assert(page.data.roomScreen.emptyCount === page.data.roomScreen.seats.length - 1,
+          '移出后除房主外全是空席，实际 ' + page.data.roomScreen.emptyCount + '/' + page.data.roomScreen.seats.length);
+        assert(page.data.roomScreen.seats[1].canKick === false, '释放后不再显示移出按钮');
+        const beforeEmpty = JSON.stringify(page.room.seats[2]);
+        tap('onRoomKick', { index: 2 });
+        assert(JSON.stringify(page.room.seats[2]) === beforeEmpty, '空席点击移出不应改动席位');
+
+        // 被踢感知（纯逻辑）：房主永不误判；非房主 uid 消失即判定被移出
+        page.room.seats[1] = Object.assign({}, page.room.seats[1], {
+          joined: true, uid: page.profile.uid, name: '我', nickname: '我', ready: false
+        });
+        page.mySeat = 1;
+        assert(page.seatStillMine(page.room.seats) === true, '席位里还有自己 uid 时未被移出');
+        const afterKickSeats = page.room.seats.slice();
+        afterKickSeats[1] = Object.assign({}, afterKickSeats[1], { uid: '', joined: false, ready: false });
+        assert(page.seatStillMine(afterKickSeats) === false, '自己 uid 从席位表消失 = 已被移出');
+        page.mySeat = 0;
+        assert(page.seatStillMine(afterKickSeats) === true, '房主永不判定为被移出');
+
+        // 被踢感知（真实轮询接线）：云端拉回「自己已不在席位表」的房间行时，
+        // pollCloud 必须自动清会话回首页，而不是继续留在房间里空转。
+        const Rx = require(ROOT + '/utils/room.js');
+        const fakeQ = {
+          select: function () { return fakeQ; },
+          eq: function () { return fakeQ; },
+          maybeSingle: function () {
+            return Promise.resolve({ data: {
+              code: 'KICK01', host_uid: 'host-uid', player_count: afterKickSeats.length,
+              seats: afterKickSeats, status: 'lobby', turn_limit: 0, version: 99
+            }, error: null });
+          },
+          then: function (resolve) { resolve({ data: [], error: null }); }
+        };
+        Rx.attachCloud({ database: { from: function () { return fakeQ; } } });
+        page._unloaded = false;
+        page.mySeat = 1;
+        page.ui.screen = 'room';
+        page.room.code = 'KICK01';
+        page.room.status = 'lobby';
+        page._cloudCode = 'KICK01';
+        page._polling = false;
+        page.pollCloud(true);
+        console.log('OK  房主踢人 · 按钮门禁 / 席位释放 / 被踢轮询已触发');
+      }
+      // pollCloud 是 Promise 链，等 microtask 排空后再做最终断言与收尾
+      setImmediate(function () {
+        try {
+          assert(page.data.screen === 'home', '轮询发现被移出后应自动回到首页');
+          assert(page.room === null, '被移出后应释放房间引用');
+          assert(page.ui.homeNotice.indexOf('重新输入房间号加入') > 0, '应提示可重新加入');
+          require(ROOT + '/utils/room.js').attachCloud(null);
+          console.log('OK  被踢感知 · 轮询自动回首页 / 会话作废 / 允许重入');
+          page.onUnload();
+          console.log('ALL RUNTIME CHECKS PASSED');
+        } catch (e2) {
+          console.error(String((e2 && e2.message) || e2));
+          process.exitCode = 1;
+        }
+      });
     } catch (e) {
       console.error(String((e && e.message) || e));
       process.exitCode = 1;

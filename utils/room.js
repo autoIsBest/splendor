@@ -222,6 +222,28 @@ function avatarName(avatar) {  for (let i = 0; i < PRESET_AVATARS.length; i++) {
 }
 
 /**
+ * 把席位释放成「等待加入」的空真人席。
+ * ------------------------------------------------------------------
+ * 只覆盖身份与状态字段，保留原席位其余字段：0 号席的 roomThemeId 承载
+ * 房间主题（见 utils/theme.js 的 withRoomTheme），云端 seats 是 JSONB、
+ * 可能还带后续版本追加的字段，整个对象替换会把这些信息静默抹掉。
+ */
+function vacantSeat(seat, index) {
+  return Object.assign({}, seat || {}, {
+    index: index,
+    uid: '',
+    name: '等待加入',
+    nickname: '',
+    avatar: '',
+    avatarUrl: '',
+    isAI: false,
+    type: 'remote',
+    joined: false,
+    ready: false
+  });
+}
+
+/**
  * 生成席位：0 号恒为房主，其余按 bots 数组决定真人空席或机器人。
  * ready 语义：房主创建房间即视为已就绪；机器人恒定就绪；真人入席后需自己点准备。
  */
@@ -541,6 +563,59 @@ async function cloudSetSeat(code, index, patch, attempt) {
 }
 
 /**
+ * 房主移出一位已入席真人：席位释放为空真人席，仅房间大厅态允许。
+ * ------------------------------------------------------------------
+ * 与 cloudSetSeat 一样「先拉最新版本再 CAS」，但多四道门禁：
+ *   ① 调用方 uid 必须等于房间 host_uid。**这是客户端侧校验，不是服务端
+ *      权威校验**：本项目的房间表目前是共享读写、且没有云函数，知道房间号
+ *      的人仍可绕过客户端直接改库。要真正强制权限必须收敛 RLS 或加
+ *      security definer RPC（见《小程序项目档案》的已知发布阻塞）。
+ *   ② status 必须是 lobby —— 开局后牌局快照 state.players 按 seats 索引
+ *      对齐，踢人会让两者错位、多端分叉，所以本轮明确不支持对局中踢人。
+ *   ③ 目标必须是非房主（0 号席）、已入席的真人，机器人与空席都不动。
+ *   ④ uid 必须与房主点击时看到的一致：CAS 竞态下房主看到 A、拉取时
+ *      席位可能已换成 B，不校验就会踢错人。
+ * 冲突时最多重试两次，与 cloudSetSeat 同口径。被踢者允许重新加入，
+ * 所以这里不做任何黑名单，也不改云端表结构。
+ */
+async function cloudKickSeat(code, index, callerUid, expectedUid, attempt) {
+  if (!hasCloud()) return offline();
+  const tryNo = attempt || 0;
+  const pulled = await cloudPullRoom(code);
+  if (!pulled.ok) return pulled;
+  if (String(pulled.room.hostUid || '') !== String(callerUid || '')) {
+    return { ok: false, error: '只有房主可以移出玩家' };
+  }
+  if ((pulled.room.status || 'lobby') !== 'lobby') {
+    return { ok: false, error: '牌局进行中不能移出玩家' };
+  }
+  const seats = (pulled.room.seats || []).slice();
+  if (!(index > 0) || index >= seats.length || !seats[index]) {
+    return { ok: false, error: '该席位不可移出' };
+  }
+  const target = seats[index];
+  if (target.isAI || !target.joined || !target.uid) {
+    return { ok: false, error: '该席位没有可移出的真人玩家' };
+  }
+  if (String(target.uid) !== String(expectedUid || '')) {
+    return { ok: false, conflict: true, error: '该席位玩家已变化，请刷新后重试' };
+  }
+  seats[index] = vacantSeat(target, index);
+  const saved = await cloudUpdateSeats(code, seats, pulled.version);
+  if (saved.conflict && tryNo < 2) {
+    return cloudKickSeat(code, index, callerUid, expectedUid, tryNo + 1);
+  }
+  if (!saved.ok) return saved;
+  return {
+    ok: true,
+    version: saved.version,
+    seats: seats,
+    kickedUid: target.uid,
+    kickedName: String(target.nickname || target.name || '该玩家')
+  };
+}
+
+/**
  * 房主开局：同一个 CAS 里把房间置为 playing 并落席位，
  * 再把牌局快照写成 version=1（重开一局时版本归零，避免旧版本号干扰乐观锁）。
  */
@@ -676,6 +751,7 @@ module.exports = {
   // 供 utils/user.js 复用同一套存储后端（wx / localStorage / Node 内存）
   storageBackend: backend,
   makeSeats: makeSeats,
+  vacantSeat: vacantSeat,
   randomFirstSeat: randomFirstSeat,
   createRoom: createRoom,
   getRoom: getRoom,
@@ -705,6 +781,7 @@ module.exports = {
   cloudUpdateSeats: cloudUpdateSeats,
   cloudUpdateRoom: cloudUpdateRoom,
   cloudSetSeat: cloudSetSeat,
+  cloudKickSeat: cloudKickSeat,
   cloudStartGame: cloudStartGame,
   cloudResetRoom: cloudResetRoom,
   cloudJoinRoom: cloudJoinRoom

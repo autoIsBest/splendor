@@ -701,6 +701,8 @@
           </view>
           <view wx:if="{{item.canToggleBot}}" class="room-seat-action"
                 catchtap="onRoomToggleBot" data-index="{{item.index}}">{{item.seatAction}}</view>
+          <view wx:if="{{item.canKick}}" class="room-seat-action is-kick"
+                catchtap="onRoomKick" data-index="{{item.index}}">移出</view>
         </view>
       </view>
 
@@ -885,6 +887,7 @@
           <text class="rule-item">6. 断线、切后台或重进小程序会自动回到原来的房间与座位；房主结束后房间失效，自动退回首页。</text>
           <text class="rule-item">7. 房间可按 10 / 30 / 60 / 90 / 120 秒或不限时对局；超时回合由机器人强制打完并结束（含退还筹码）——自己超时本机接管，别人超时由房主在宽限 12 秒后接管。</text>
           <text class="rule-item">8. 回合末筹码超过 10 枚时，按官方规则可退还任意颜色的筹码（含黄金），同色可退多枚，只需退到 10 枚：重复点同一枚筹码即可累加，点筹码上的「−」逐枚撤回。</text>
+          <text class="rule-item">9. 开局前房主可把已入席的真人「移出」房间，席位释放为「等待加入」，之后可再邀请别人或改为机器人；牌局开始后不再支持移出。被移出的玩家仍可用同一房间号重新加入。</text>
           <text class="rule-note">牌组为官方 90 张逐张对应（一级 40 / 二级 30 / 三级 20），贵族 10 张；卡面插画取自 Cleveland Museum of Art 开放获取（CC0）绘画，牌序每局随机。</text>
         </view>
         <view class="dialog-btns">

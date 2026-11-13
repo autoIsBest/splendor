@@ -922,6 +922,9 @@ function recordsVM(ui) {
 function roomScreenVM(ui, room, profile, mySeat, avatars) {
   const self = mySeat || 0;
   const amHost = self === 0;
+  // 房主移出玩家只在房间大厅态开放：开局后牌局快照按席位索引对齐，
+  // 改席位会让快照与房间错位，所以 playing / ended 一律不给按钮。
+  const inLobby = !!room && (room.status || 'lobby') === 'lobby';
   const raw = (room && room.seats) || [];
   const list = [];
   let joinedHumans = 0;
@@ -968,6 +971,9 @@ function roomScreenVM(ui, room, profile, mySeat, avatars) {
       canReady: !isHost && !isBot && joined && isSelf,
       // 房主可以点空席加机器人、点机器人席位撤掉；已入席的真人席位不动
       canToggleBot: amHost && !isSelf && (isBot || !joined),
+      // 只对「已入席的真人、非自己、非 0 号房主席」显示移出按钮。
+      // 与 canToggleBot 天然互斥（后者只针对机器人或空席），不会同框出现。
+      canKick: amHost && inLobby && !isSelf && !isHost && !isBot && joined,
       seatAction: isBot ? '取消机器人' : '设为机器人',
       // 整张席位卡可点：房主点空位 = 加机器人，真人点自己席位 = 准备
       tappable: isSelf ? !isHost && !isBot : (amHost && (isBot || !joined))
@@ -3026,7 +3032,7 @@ Page({
   },
 
   /** 房间没了（房主解散 / 过期 / 云上查不到）：收摊回首页，别让轮询永远空转 */
-  handleRoomLost(reason) {
+  handleRoomLost(reason, message) {
     this.stopCloudPolling();
     this.clearSession();
     this.state = null;
@@ -3041,8 +3047,29 @@ Page({
     const solo = this.ui.soloCount;
     const roomCount = this.ui.roomCount;
     this.ui = freshUI({ screen: 'home', soloCount: solo, roomCount: roomCount });
-    this.ui.homeNotice = '房间已结束：' + (reason || '房主已解散或房间已过期');
+    this.ui.homeNotice = message || ('房间已结束：' + (reason || '房主已解散或房间已过期'));
     this.refresh('');
+  },
+
+  /**
+   * 轮询到新的席位表时，判断本机是否已被房主移出房间。
+   * 房主（mySeat=0）不会被移出；非房主按 uid 在 1..n-1 号席里找自己，
+   * 席位被释放后 uid 变空，这里就会返回 false。
+   */
+  seatStillMine(seats) {
+    if (this.mySeat <= 0) return true;
+    const uid = String((this.profile && this.profile.uid) || '');
+    if (!uid) return true;
+    for (let i = 1; i < (seats || []).length; i += 1) {
+      const s = seats[i];
+      if (s && !s.isAI && String(s.uid || '') === uid) return true;
+    }
+    return false;
+  },
+
+  /** 被房主移出：只解除本机绑定，不解散房间；允许对方凭房间号重新加入 */
+  handleKicked() {
+    this.handleRoomLost('', '你已被房主移出房间 · 可重新输入房间号加入');
   },
 
   /* ---------- 云端牌局同步（浏览器预览下全部为空操作） ---------- */
@@ -3568,6 +3595,12 @@ Page({
         }
         that.noteNetOk();
         if (res.room.status === 'ended') { that.handleRoomLost('房主已解散房间'); return; }
+        // 被房主移出房间：本机 uid 已从席位表消失。只在 lobby 态判定 ——
+        // 开局后不改席位，避免牌桌端因一次抖动被误判踢出。
+        if (res.room.status === 'lobby' && !that.seatStillMine(res.room.seats)) {
+          that.handleKicked();
+          return;
+        }
         const changed = force || res.version !== that._roomVersion;
         that._roomVersion = res.version;
         that.room = Object.assign({}, that.room, res.room, { mode: 'room' });
@@ -4392,18 +4425,15 @@ Page({
     if (seat.joined && !seat.isAI) return;
     const next = !seat.isAI;
     this.ui.bots[i] = next;
-    this.room.seats[i] = Object.assign({}, seat, {
-      index: i,
-      isAI: next,
-      type: next ? 'bot' : 'remote',
-      joined: next,
-      ready: next,
-      uid: '',
-      name: next ? '机器人 ' + (i + 1) : '等待加入',
-      nickname: next ? ('机器人 ' + (i + 1)) : '',
-      avatar: next ? R.PRESET_AVATARS[i % R.PRESET_AVATARS.length].key : '',
-      avatarUrl: ''
-    });
+    // 释放席位与「房主移出玩家」共用同一份空席口径，避免两处字段漂移
+    this.room.seats[i] = next
+      ? Object.assign({}, seat, {
+          index: i,
+          isAI: true, type: 'bot', joined: true, ready: true,
+          uid: '', name: '机器人 ' + (i + 1), nickname: '机器人 ' + (i + 1),
+          avatar: R.PRESET_AVATARS[i % R.PRESET_AVATARS.length].key, avatarUrl: ''
+        })
+      : R.vacantSeat(seat, i);
     this.refresh(next
       ? '席位 ' + (i + 1) + ' 已交给机器人'
       : '席位 ' + (i + 1) + ' 已释放给好友');
@@ -4413,6 +4443,66 @@ Page({
       if (res.ok) { that._roomVersion = res.version; return; }
       if (res.conflict) { that.pollCloud(true); return; }
       if (!res.offline) { that.ui.roomNotice = res.error; that.refresh(''); }
+    });
+  },
+
+  /**
+   * 房主移出一位已入席真人（仅大厅态）。
+   * ------------------------------------------------------------------
+   * 二次确认 → 本机先释放席位（离线 / 浏览器预览也能用）→ 云端 CAS。
+   * 云端拒绝时把本机席位回滚，并强制拉一次最新房间：否则房主看到
+   * 「已移出」，其他人那边人还在，两边界面会长期不一致。
+   */
+  onRoomKick(event) {
+    const i = Number(event.currentTarget.dataset.index);
+    const room = this.room;
+    if (!room || !room.seats[i] || i === 0) return;
+    if (this.mySeat !== 0) {
+      this.ui.roomNotice = '只有房主可以移出玩家';
+      this.refresh('');
+      return;
+    }
+    if ((room.status || 'lobby') !== 'lobby') {
+      this.ui.roomNotice = '牌局进行中不能移出玩家';
+      this.refresh('');
+      return;
+    }
+    const seat = room.seats[i];
+    if (seat.isAI || !seat.joined || !seat.uid) {
+      this.ui.roomNotice = '该席位没有可移出的真人玩家';
+      this.refresh('');
+      return;
+    }
+    const that = this;
+    const name = String(seat.nickname || seat.name || '该玩家');
+    const uid = String(seat.uid);
+    const doKick = function () {
+      const before = that.room && that.room.seats[i];
+      if (!before || String(before.uid || '') !== uid) {
+        that.ui.roomNotice = '席位已变化，请刷新后重试';
+        that.refresh('');
+        return;
+      }
+      that.room.seats[i] = R.vacantSeat(before, i);
+      that.refresh('已移出 ' + name + ' · 席位已释放');
+      if (!R.hasCloud() || !that._cloudCode) return;
+      const callerUid = ((that.profile || R.getProfile()).uid) || '';
+      R.cloudKickSeat(that._cloudCode, i, callerUid, uid).then(function (res) {
+        if (res.ok) { that._roomVersion = res.version; return; }
+        // 云端没落地就回滚，别让房主端显示一个别人看不到的空席
+        if (that.room) that.room.seats[i] = before;
+        that.ui.roomNotice = res.error || '移出失败，请重试';
+        that.refresh('');
+        if (res.conflict) that.pollCloud(true);
+      });
+    };
+    if (typeof wx === 'undefined' || !wx.showModal) { doKick(); return; }
+    wx.showModal({
+      title: '移出该玩家？',
+      content: name + ' 会被移出房间，席位释放为「等待加入」。对方仍可用房间号重新加入。',
+      confirmText: '移出',
+      cancelText: '取消',
+      success: function (res) { if (res.confirm) doKick(); }
     });
   },
 

@@ -353,13 +353,84 @@ async function cloudChecks() {
   assert.ok(missing.error.indexOf('未找到') >= 0, '不存在的房间应给出明确提示');
   assert.equal((await R.cloudJoinRoom('BAD', guest)).ok, false, '非法房间号应被拒');
 
+  /* ---- C. 房主踢人：仅大厅态 / 只清目标席 / 允许重新加入 ---- */
+  const kickHost = R.saveProfile({ nickname: '踢人房主', avatar: 'a0' });
+  const kickSeats = R.makeSeats(3, { 1: false, 2: true }, kickHost);
+  const kickRoom = R.createRoom({ playerCount: 3, seats: kickSeats, profile: kickHost });
+  assert.ok((await R.cloudCreateRoom(kickRoom, null)).ok, '踢人专项房间应建成');
+  const kickGuest = R.defaultProfile();
+  kickGuest.uid = 'kick-guest-uid';
+  kickGuest.nickname = '被移出的玩家';
+  const kickJoined = await R.cloudJoinRoom(kickRoom.code, kickGuest);
+  assert.ok(kickJoined.ok, '好友入席应成功：' + (kickJoined.error || ''));
+  assert.equal(kickJoined.seat, 1, '好友坐到 1 号席');
+
+  // 空席构造必须保留云端 JSONB 的附加字段（0 号席 roomThemeId 承载房间主题）
+  const kept = R.vacantSeat({ index: 1, uid: 'x', roomThemeId: 'royal', custom: 7 }, 1);
+  assert.equal(kept.roomThemeId, 'royal', 'vacantSeat 不得抹掉主题字段');
+  assert.equal(kept.custom, 7, 'vacantSeat 不得抹掉席位附加字段');
+  assert.equal(kept.uid, '', 'vacantSeat 应清空 uid');
+  assert.equal(kept.joined, false, 'vacantSeat 应回到未入席');
+
+  // ① 非房主不得踢
+  const notHost = await R.cloudKickSeat(kickRoom.code, 1, 'impostor', kickGuest.uid);
+  assert.equal(notHost.ok, false, '非房主应被拒绝');
+  assert.ok(notHost.error.indexOf('只有房主') >= 0, '拒绝原因应明确');
+
+  // ② 房主席 / 机器人席 / 越界席都不可踢
+  assert.equal((await R.cloudKickSeat(kickRoom.code, 0, kickHost.uid, kickHost.uid)).ok, false,
+    '0 号房主席不可移出');
+  assert.equal((await R.cloudKickSeat(kickRoom.code, 2, kickHost.uid, '')).ok, false,
+    '机器人席不可移出');
+  assert.equal((await R.cloudKickSeat(kickRoom.code, 99, kickHost.uid, '')).ok, false,
+    '越界席位不可移出');
+
+  // ③ expectedUid 不匹配：CAS 竞态下不能踢错人
+  const wrongUid = await R.cloudKickSeat(kickRoom.code, 1, kickHost.uid, 'another-uid');
+  assert.equal(wrongUid.ok, false, 'uid 不匹配应拒绝');
+  assert.equal(wrongUid.conflict, true, '应标成冲突以便上层刷新');
+
+  // ④ 房主踢：只清目标席，其余席位与房间状态不变
+  const beforeKick = await R.cloudPullRoom(kickRoom.code);
+  const kicked = await R.cloudKickSeat(kickRoom.code, 1, kickHost.uid, kickGuest.uid);
+  assert.ok(kicked.ok, '房主移出应成功：' + (kicked.error || ''));
+  assert.equal(kicked.version, beforeKick.version + 1, 'CAS 版本 +1');
+  assert.equal(kicked.kickedUid, kickGuest.uid, '返回被移出者的 uid');
+  const afterKick = await R.cloudPullRoom(kickRoom.code);
+  const s1 = afterKick.room.seats[1];
+  assert.equal(s1.uid, '', '目标席 uid 清空');
+  assert.equal(s1.joined, false, '目标席回到未入席');
+  assert.equal(s1.ready, false, '目标席准备状态清空');
+  assert.equal(s1.isAI, false, '目标席仍是真人空席，不自动补机器人');
+  assert.equal(s1.name, '等待加入', '目标席文案回到等待加入');
+  assert.equal(afterKick.room.seats[0].uid, kickHost.uid, '房主席位不受影响');
+  assert.equal(afterKick.room.seats[2].isAI, true, '机器人席位不受影响');
+  assert.equal(afterKick.room.status, 'lobby', '房间仍在大厅态');
+
+  // ⑤ 本轮产品决策：允许被踢者凭同一房间号重新加入
+  const kickRejoin = await R.cloudJoinRoom(kickRoom.code, kickGuest);
+  assert.ok(kickRejoin.ok, '被移出者应能重新加入：' + (kickRejoin.error || ''));
+  assert.equal(kickRejoin.seat, 1, '重新坐回释放的空席');
+
+  // ⑥ 对局中禁止踢人：避免牌局快照 players 与 seats 错位
+  const gv = (await R.cloudPullRoom(kickRoom.code)).version;
+  assert.ok((await R.cloudUpdateRoom(kickRoom.code, { status: 'playing' }, gv)).ok,
+    '切到进行中应成功');
+  const inGame = await R.cloudKickSeat(kickRoom.code, 1, kickHost.uid, kickGuest.uid);
+  assert.equal(inGame.ok, false, '对局中应拒绝移出');
+  assert.ok(inGame.error.indexOf('牌局进行中') >= 0, '拒绝原因应说明阶段');
+  assert.equal((await R.cloudPullRoom(kickRoom.code)).room.seats[1].uid, kickGuest.uid,
+    '被拒后席位不应被改动');
+
   // 还原为本地模式，避免影响同一进程内的其他测试
   R.attachCloud(null);
   assert.equal(R.hasCloud(), false);
   assert.equal((await R.cloudPullGame(playingRoom.code)).offline, true);
+  assert.equal((await R.cloudKickSeat(kickRoom.code, 1, kickHost.uid, kickGuest.uid)).offline, true,
+    '无云时踢人应返回 offline');
   R.clear();
 
-  console.log('PASS  云端 RoomAdapter：离线降级 / 大厅入席 / 准备 / 开局 / 快照 / 乐观锁 / 断线重连 / 解散');
+  console.log('PASS  云端 RoomAdapter：离线降级 / 大厅入席 / 准备 / 开局 / 快照 / 乐观锁 / 断线重连 / 解散 / 房主踢人');
   console.log('ALL MULTIPLAYER CHECKS PASSED');
 }
 

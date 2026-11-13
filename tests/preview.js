@@ -701,6 +701,38 @@ a.page.room.seats[1] = origSeat1;
 a.page.refresh('');
 assert(a.host.innerHTML.indexOf('已准备 1/3') > 0, '还原空席后回到只剩房主就绪');
 
+// 4.1.2 房主移出：按钮只在「房主 + 大厅 + 已入席真人」出现，点击后释放空席
+a.page.room.seats[1] = Object.assign({}, origSeat1, {
+  joined: true, uid: 'kick-preview-guest', name: '待移出', nickname: '待移出', ready: false
+});
+a.page.refresh('');
+const kickHtml = a.host.innerHTML;
+assert(kickHtml.indexOf('data-catchtap="onRoomKick"') > 0, '房主应看到「移出」按钮');
+assert(kickHtml.indexOf('is-kick') > 0, '移出按钮应使用危险色样式');
+assert(kickHtml.indexOf('移出') > 0, '移出按钮文案应渲染出来');
+
+const savedKickSeat = a.page.mySeat;
+a.page.mySeat = 2;
+a.page.refresh('');
+assert(a.host.innerHTML.indexOf('data-catchtap="onRoomKick"') === -1, '非房主不应看到移出按钮');
+a.page.mySeat = savedKickSeat;
+const savedKickStatus = a.page.room.status;
+a.page.room.status = 'playing';
+a.page.refresh('');
+assert(a.host.innerHTML.indexOf('data-catchtap="onRoomKick"') === -1, '牌局进行中不应显示移出按钮');
+a.page.room.status = savedKickStatus;
+a.page.refresh('');
+
+click('onRoomKick', { index: 1 });
+assert(a.page.room.seats[1].uid === '' && a.page.room.seats[1].joined === false,
+  'H5 预览点「移出」后席位应释放为空真人席');
+assert(a.host.innerHTML.indexOf('data-catchtap="onRoomKick"') === -1, '移出后按钮应消失');
+console.log('房间流：房主移出按钮 / 视角门禁 / 席位释放 OK');
+
+// 再次还原，避免影响后续「空席→机器人」链路
+a.page.room.seats[1] = origSeat1;
+a.page.refresh('');
+
 click('onRoomToggleBot', { index: 1 });
 click('onRoomToggleBot', { index: 2 });
 assert(a.page.data.roomScreen.canStart === true, '全员就绪后房主可开始');
