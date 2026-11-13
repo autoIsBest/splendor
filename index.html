@@ -5643,7 +5643,10 @@ __def("user", function (module, exports, require) {
  *
  * 数据表：
  *   splendor_players(uid pk, nickname, avatar, avatar_url, stats jsonb, updated_at)
- *   splendor_records(id pk, uid, mode, player_count, rank, score, win, room_code, played_at)
+ *   splendor_records(id pk, uid, mode, player_count, rank, score, win, room_code, played_at, game_id)
+ *
+ * game_id 是「一局」的标识，随云端牌局快照下发；战绩按它去重，
+ * 重连 / 跨设备回到同一局时不会重复记一条，也不会把进场时刻当开局时刻。
  */
 
 const R = require('./room.js');
@@ -5655,6 +5658,8 @@ const RECORDS_OWNER_KEY = 'splendor.records-owner.v1';
 const RECORDS_PREFIX = 'splendor.records.v2.';
 const ACCOUNT_PREFIX = 'splendor.account.v1.';
 const IMPORT_PREFIX = 'splendor.record-import.v1.';
+/* 天梯榜「已落本地但还没确认发布到云端」的战绩 id 队列，按 uid 分区 */
+const PUBLISH_PREFIX = 'splendor.leaderboard-pending.v1.';
 const AVATAR_CACHE_KEY = 'splendor.avatars.v1';
 const PLAYER_TABLE = 'splendor_players';
 const RECORD_TABLE = 'splendor_records';
@@ -5913,6 +5918,9 @@ function addRecord(input, profile) {
     humanCount: src.humanCount === undefined
       ? undefined
       : Math.min(4, Math.max(0, Number(src.humanCount) || 0)),
+    // 本局唯一标识（来自 state.gameId）。老牌局 / 手工构造的 state 没有，
+    // 留空则退回只靠页面内 _resultRecorded 去重。
+    gameId: String(src.gameId || ''),
     at: Number(src.at) || Date.now(),
     roomCode: src.roomCode || '',
     opponents: (src.opponents || []).slice(0, 3)
@@ -5922,6 +5930,9 @@ function addRecord(input, profile) {
   // 统一按时间倒序：连胜统计与「最近对局」都依赖顺序，不能只看写入先后
   list.sort(function (a, b) { return b.at - a.at; });
   saveRecords(list);
+  // 先入「未确认发布」队列，再由页面层打包增量推榜；publish 成功才出队。
+  // 与 pushRecord 是否成功无关：战绩明细上云和天梯累计上云是两条独立链路。
+  markUnpublished(rec.id, rec.uid);
   pushRecord(rec);
   return rec;
 }
@@ -5929,6 +5940,53 @@ function addRecord(input, profile) {
 function clearRecords() {
   // 写空数组，避免删除分区后又从 v1 备份复活已清空的记录。
   saveRecords([]);
+}
+
+/* ---------- 一局一条的去重 + 天梯「未确认发布」队列 ---------- */
+
+/** 本 uid 是否已经记过这一局：重连 / 跨设备回到同一局时的幂等锚点 */
+function hasGameRecord(gameId) {
+  const gid = String(gameId || '');
+  if (!gid) return false;
+  // getRecords() 本身按当前 uid 分区，无需再传一次 uid 造成口径分叉
+  const list = getRecords();
+  for (let i = 0; i < list.length; i++) {
+    if (String(list[i].gameId || '') === gid) return true;
+  }
+  return false;
+}
+
+function publishKey(uid) {
+  return accountKey(PUBLISH_PREFIX, uid || R.getProfile().uid);
+}
+
+function markUnpublished(id, uid) {
+  if (!id) return;
+  const key = publishKey(uid);
+  const ids = readJSON(key) || [];
+  if (ids.indexOf(id) >= 0) return;
+  ids.push(id);
+  // 队列只服务于「还没确认发布」的局，长度与战绩上限对齐即可
+  writeJSON(key, ids.slice(-MAX_RECORDS));
+}
+
+/** 队列里仍存在于本机战绩的记录；被清掉 / 被 MAX_RECORDS 挤掉的自动剔除 */
+function unpublishedRecords(uid) {
+  const ids = readJSON(publishKey(uid)) || [];
+  if (!ids.length) return [];
+  const map = {};
+  ids.forEach(function (id) { map[id] = true; });
+  return getRecords().filter(function (r) { return !!map[r.id]; });
+}
+
+/** publish 成功后只清这次确实打包的 id，不动期间新结算的局 */
+function clearUnpublished(ids, uid) {
+  if (!ids || !ids.length) return;
+  const key = publishKey(uid);
+  const done = {};
+  ids.forEach(function (id) { done[id] = true; });
+  const rest = (readJSON(key) || []).filter(function (id) { return !done[id]; });
+  writeJSON(key, rest);
 }
 
 /** 汇总统计：界面顶部三格与战绩页总览都用它 */
@@ -6187,7 +6245,7 @@ async function pushRecord(rec) {
   if (!database || !rec || !rec.id) return { ok: false, offline: true };
   if (!ownsUid(rec.uid)) return { ok: false, stale: true };
   try {
-    const res = await database.from(RECORD_TABLE).upsert({
+    const row = {
       id: rec.id,
       uid: rec.uid || '',
       mode: rec.mode,
@@ -6196,8 +6254,18 @@ async function pushRecord(rec) {
       score: rec.score,
       win: !!rec.win,
       room_code: rec.roomCode || '',
+      // 一局一条的去重锚点；旧环境没这列时下面会降级重试
+      game_id: rec.gameId || '',
       played_at: nowIso(rec.at)
-    });
+    };
+    let res = await database.from(RECORD_TABLE).upsert(row);
+    // 云端表还没补 game_id（旧环境 / 平台侧重置过表）时不能让整条战绩上云失败。
+    // 去掉该列重试一次：跨设备去重能力降级，但明细本身不丢。
+    if (res && res.error && /column|schema|does not exist|42703|42P01/i.test(errText(res.error))) {
+      const legacy = Object.assign({}, row);
+      delete legacy.game_id;
+      res = await database.from(RECORD_TABLE).upsert(legacy);
+    }
     if (res && res.error) return { ok: false, error: errText(res.error) };
     return { ok: true };
   } catch (e) {
@@ -6217,6 +6285,10 @@ function rowToRecord(row) {
     win: !!row.win,
     tie: false,
     turns: 0,
+    // 云端明细行只存精简字段，humanCount / cards / nobles / turnAvgMs 一律缺失：
+    // 这些回补记录按「无法判定」处理，不进天梯准入，也不该参与速度项。
+    // game_id 单独补回，让跨设备回到同一局时仍能去重。
+    gameId: row.game_id || '',
     at: row.played_at ? new Date(row.played_at).getTime() : Date.now(),
     roomCode: row.room_code || '',
     opponents: []
@@ -6418,6 +6490,10 @@ module.exports = {
   getRecords: getRecords,
   addRecord: addRecord,
   clearRecords: clearRecords,
+  hasGameRecord: hasGameRecord,
+  markUnpublished: markUnpublished,
+  unpublishedRecords: unpublishedRecords,
+  clearUnpublished: clearUnpublished,
   statsOf: statsOf,
   rankTitle: rankTitle,
   recordList: recordList,
@@ -7105,8 +7181,12 @@ function fromRecord(rec) {
   t.totalScore = num(r.score);
   t.totalCards = num(r.cards);
   t.totalNobles = num(r.nobles);
-  t.totalTurns = turns;
-  t.totalTurnMs = Math.round(perTurn * turns);
+  // 只有「耗时有效」的局才参与速度项。旧记录 / 云端回补的行缺 turnAvgMs，
+  // 重连到已结束快照更是会算出 0.005s/行动这种伪耗时 —— 若仍把 turns 计进
+  // totalTurns，avgTurnSec 会被拉向 0，等于给这些局发满速度分。
+  // 宁可少一个耗时样本，也不能让分母失真：两项要么都记，要么都不记。
+  t.totalTurns = perTurn > 0 ? turns : 0;
+  t.totalTurnMs = perTurn > 0 ? Math.round(perTurn * turns) : 0;
   return t;
 }
 
@@ -7246,21 +7326,59 @@ function entryToCloud(entry, score) {
   };
 }
 
-/** 结算后把本机「全量累计」写进云端；失败静默降级，不影响结算面板 */
-async function publish(cloud, profile, totals) {
+/**
+ * 结算后把「本局增量」合并进云端累计行；失败静默降级，不影响结算面板。
+ * ------------------------------------------------------------------
+ * 为什么不能再用本机全量累计覆盖云端：
+ *   splendor_records 只存 9 列，跨设备回补到本地的记录缺 humanCount / cards /
+ *   nobles / turnAvgMs，一律不满足天梯准入。若拿 L.fromRecords(getRecords())
+ *   的结果 upsert，一台刚冷启动、明细几乎全是「不可判定」的设备会把云端
+ *   20 局的累计直接覆盖成 1 局 —— 榜单累计被静默回退。
+ *
+ * 所以发布口径改为「云端行是权威累计，本机只追加这一局的增量」：
+ *   读自己那一行 → mergeTotals(云端累计, 本局增量) → 写回。
+ *   这样既不回退、也不吞掉新局，且与本机明细是否完整无关。
+ *
+ * 读失败时宁可跳过本次发布，也不退回「全量覆盖」—— 后者正是要修的 bug。
+ * 不丢局由页面层的「未确认发布队列」保证：增量来自本地战绩，publish 成功
+ * 才清队列，失败则下次结算把积压的局一并重放。
+ *
+ * 幂等由页面层保证：一局只结算一次（gameId 去重 + _resultRecorded），
+ * publish 本身不做去重，重复调用会重复累加。
+ */
+async function publish(cloud, profile, delta) {
   try {
     const database = cloud && cloud.database;
     if (!database || !profile || !profile.uid) return { ok: false, error: 'no-cloud' };
-    // 没有任何合格对局就不上榜：否则「从没打过联机真人局的人」也会占一行 0 分，
-    // 榜单会被大量空行稀释。已有云端行的玩家若之后局数归零（清空战绩），
-    // 这里同样不会写回，云端旧行保持原样。
-    if (!num((totals || blank()).games)) return { ok: false, error: 'no-eligible-games' };
-    const entry = entryOf(profile.uid, profile.nickname,
-      profile.avatarData || '', totals || blank());
-    const score = rating(summarize(entry.totals));
-    const res = await database.from(LEADERBOARD_TABLE).upsert(entryToCloud(entry, score));
-    if (res && res.error) return { ok: false, error: String(res.error.message || res.error) };
-    return { ok: true, rating: score };
+    const d = delta || blank();
+    // 0 局不上榜：人机局 / 不合格局不写，也不发任何请求，
+    // 否则「从没打过联机真人局的人」会占一行 0 分，稀释榜单。
+    if (!num(d.games)) return { ok: false, error: 'no-eligible-games' };
+
+    let base = blank();
+    let res;
+    try {
+      let query = database.from(LEADERBOARD_TABLE).select('*');
+      // 老版本 SDK 没有 eq 时直接走降级，不要退化成整表拉取后瞎猜自己那行
+      if (typeof query.eq !== 'function') return { ok: false, error: 'read-failed' };
+      query = query.eq('uid', profile.uid);
+      if (typeof query.limit === 'function') query = query.limit(1);
+      res = await query;
+    } catch (e) {
+      return { ok: false, error: 'read-failed' };
+    }
+    if (!res || res.error || !Array.isArray(res.data)) return { ok: false, error: 'read-failed' };
+    if (res.data.length) {
+      const row = cloudToEntry(res.data[0]);
+      if (row) base = row.totals;
+    }
+
+    const merged = mergeTotals(base, d);
+    const entry = entryOf(profile.uid, profile.nickname, profile.avatarData || '', merged);
+    const score = rating(summarize(merged));
+    const up = await database.from(LEADERBOARD_TABLE).upsert(entryToCloud(entry, score));
+    if (up && up.error) return { ok: false, error: String(up.error.message || up.error) };
+    return { ok: true, rating: score, games: merged.games };
   } catch (e) {
     return { ok: false, error: String((e && e.message) || e) };
   }
@@ -14060,6 +14178,19 @@ const META = D.GEM_META;
 // 终局线：声望达到 15 触发最后一轮。界面按真实数值渲染，不在此截断
 const FINAL_POINTS = 15;
 
+/**
+ * 每次行动耗时的可信下限。
+ * 重连进场时若把「进场时刻」当成开局时刻，一局 101 个行动会被算成
+ * 505ms / 101 ≈ 0.005s/行动，写进累计后把 avgTurnSec 拉向 0，
+ * 等于凭空拿满速度分。低于下限的计时一律记 0，让速度项跳过这一局。
+ */
+const MIN_VALID_TURN_MS = 200;
+
+/** 本局唯一标识：开局时生成一次，随云端牌局快照下发，全场同一份 */
+function newGameId() {
+  return 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
 function gemStyle(g) {
   const m = META[g];
   return 'background:radial-gradient(circle at 34% 26%,' + m.edge + ' 0%,' + m.main + ' 44%,' + m.dark + ' 100%);';
@@ -16173,6 +16304,8 @@ Page({
     const profile = this.profile || R.getProfile();
     const seats = R.makeSeats(this.ui.playerCount, this.ui.bots, profile);
     this.state = E.createGame({ playerCount: this.ui.playerCount, seats: seats });
+    // 一局一条：即使没有云端，本地战绩去重也用得上
+    this.state.gameId = newGameId();
     // 人机局不计时：单人对着 AI 看倒计时没有意义
     this.state.turnLimit = 0;
     this.room = R.createRoom({
@@ -16283,12 +16416,19 @@ Page({
    * 结算时落一条战绩。
    * refresh() 在轮询（1.6s）与每次动作后都会调用，所以必须靠 _resultRecorded 幂等，
    * 否则结算弹层每重绘一次就会多记一条，胜率被自己刷歪。
+   * 但 _resultRecorded 只是页面内状态：冷启动 / 重连 / 房间恢复都会把它复位，
+   * 所以再用随快照下发的 gameId 在本地战绩里做第二道去重（跨页面、跨设备）。
    */
   maybeRecordResult() {
     const st = this.state;
     if (!st || !st.gameOver || this._resultRecorded) return;
     const players = st.players || [];
     if (!players.length) return;
+    const gid = String(st.gameId || '');
+    if (gid && U.hasGameRecord(gid)) {
+      this._resultRecorded = true;
+      return;
+    }
     const seat = this.mySeat || 0;
     const me = players[seat] || players[0];
     // 名次口径与引擎结算一致：声望高者靠前，同分时发展卡少者靠前
@@ -16309,12 +16449,17 @@ Page({
     // 回合平均耗时：以「本局开始 → 结算」的总耗时 / 回合数。
     // 这是页面级计时，绝不写进 state 快照（联机两端节奏不同，写进去会分叉）。
     const elapsed = Math.max(0, Date.now() - (this._gameStartedAt || Date.now()));
-    const turnAvgMs = Math.round(elapsed / Math.max(1, st.turnCount));
+    const perTurn = elapsed / Math.max(1, st.turnCount);
+    // 进场就撞上已结束快照时 elapsed≈0，会算出 0.005s/行动这种伪耗时。
+    // 记 0 而不是记个假数：fromRecord 会让这一局不参与速度项的分母。
+    const turnAvgMs = perTurn < MIN_VALID_TURN_MS ? 0 : Math.round(perTurn);
     // 真人数：isAI=false 的席位。autoPlay（真人临时托管）仍算真人 ——
     // 那是可以随时收回操作权的真人席位，用 isAI 表达就再也拿不回来了。
     let humanCount = 0;
     for (let i = 0; i < players.length; i++) if (!players[i].isAI) humanCount += 1;
-    U.addRecord({
+    const rec = U.addRecord({
+      // 与快照同源的局标识：本地战绩按它去重，云端明细也带它
+      gameId: gid,
       mode: this.mode === 'room' ? 'room' : 'solo',
       playerCount: players.length,
       // 天梯榜准入判断用：只有「联机 + 真人 ≥ 2」的对局才计入
@@ -16332,16 +16477,37 @@ Page({
       roomCode: this._cloudCode || '',
       opponents: opponents
     }, this.profile);
-    // 结算后才把全量累计推上云，榜单一局只写一次（_resultRecorded 幂等）
-    this.publishLeaderboard();
+    // 结算后才把本局增量推上云，榜单一局只写一次（_resultRecorded + gameId 双重幂等）
+    this.publishLeaderboard(rec);
   },
 
-  /** 把本机战绩累计量写进天梯榜；无云 / 表不存在都静默降级 */
-  publishLeaderboard() {
+  /**
+   * 把「尚未确认发布」的合格局打包成一份增量推榜。
+   * 云端累计行才是权威值，本机不再用全量战绩重算覆盖 —— 跨设备回补的
+   * 精简战绩缺 humanCount 等字段，全都不满足准入，重算只会把云端 20 局
+   * 静默覆盖成 1 局。publish 成功才清队列，读失败时下次结算把积压局一并重放。
+   */
+  publishLeaderboard(rec) {
     if (!R.hasCloud()) return;
     const profile = this.profile || R.getProfile();
-    L.publish(R.getCloud(), profile, L.fromRecords(U.getRecords()))
-      .then(function () {}).catch(function () {});
+    let pending = U.unpublishedRecords(profile.uid);
+    // 兜底：万一入队失败，刚结算这局也要带上
+    if (rec && !pending.some(function (r) { return r.id === rec.id; })) {
+      pending = pending.concat([rec]);
+    }
+    let delta = L.blank();
+    const ids = [];
+    for (let i = 0; i < pending.length; i++) {
+      const r = pending[i];
+      if (!L.eligible(r)) continue;    // 人机局 / 字段不全的局不推增量
+      delta = L.mergeTotals(delta, L.fromRecord(r));
+      ids.push(r.id);
+    }
+    if (!delta.games) return;
+    L.publish(R.getCloud(), profile, delta)
+      .then(function (res) {
+        if (res && res.ok) U.clearUnpublished(ids, profile.uid);
+      }).catch(function () {});
   },
 
   /** 自己的榜单条目：始终用本机战绩，云端行可能落后刚结算的这一局 */
@@ -17115,7 +17281,8 @@ Page({
       that.ui.netNotice = '';
 
       if (res.status === 'playing' && res.state) {
-        that.state = res.state;
+        // 恢复会话 / 好友进场：已结束的牌局不补记战绩（见 adoptCloudState）
+        that.adoptCloudState(res.state, true);
         if (res.state.lastAction) that._seenActionId = res.state.lastAction.id;
         const p = that.state.players[that.mySeat];
         if (p) {
@@ -17150,6 +17317,27 @@ Page({
     });
   },
 
+  /**
+   * 接收一份云端牌局快照时，同步「一局一条战绩」的记账状态。
+   * ------------------------------------------------------------------
+   * entering=true 表示这是进场 / 恢复会话：若拿到的快照已经结束，本机
+   * 并没有这局的过程数据，既不该记战绩，更不能把「进场时刻」当开局时刻
+   * （那会算出 0.005s/行动这种伪耗时，把速度项污染掉）。
+   * 同一局重连（gameId 相同）则保留原来的计时起点与记账状态；换了局且
+   * 正在进行，才把计时起点移到当前时刻。
+   * 轮询替换快照用 entering=false：本机亲历了这局，结算时照常记账。
+   */
+  adoptCloudState(st, entering) {
+    const prevGid = String((this.state && this.state.gameId) || '');
+    const nextGid = String((st && st.gameId) || '');
+    const sameGame = !!nextGid && prevGid === nextGid;
+    const ended = !!(st && st.gameOver);
+    this.state = st;
+    if (!entering) return;
+    this._resultRecorded = !!(ended || (sameGame && this._resultRecorded));
+    if (!sameGame && !ended) this._gameStartedAt = Date.now();
+  },
+
   /** 房主开局后，其他设备轮询到 status=playing 时切入牌桌 */
   enterCloudGame() {
     if (this._enteringGame) return;
@@ -17161,7 +17349,7 @@ Page({
       if (that._unloaded || that._cloudCode !== code || that.profile.uid !== ownerUid) return;
       that._enteringGame = false;
       if (!res.ok) return;         // 快照还没写完，下一轮轮询再试
-      that.state = res.state;
+      that.adoptCloudState(res.state, true);
       that._cloudVersion = res.version;
       // 进场不重放上一手：重连回来先看清牌面，再看别人下一步怎么走
       if (res.state && res.state.lastAction) that._seenActionId = res.state.lastAction.id;
@@ -17170,7 +17358,8 @@ Page({
       that.ui.detail = null;
       that.ui.selectedGems = [];
       that.ui.discardPlan = [];
-      that._resultRecorded = false; that._gameStartedAt = Date.now();
+      // 记账状态与计时起点已由 adoptCloudState 按「是否同一局 / 是否已结束」定好，
+      // 这里不能再无条件复位：那正是重复记一局 + 伪耗时的来源。
       that.resetTurnUI();
       that.refresh('牌局开始');
       that.saveSession();
@@ -17569,7 +17758,8 @@ Page({
         return;
       }
       that._cloudVersion = res.version;
-      that.state = res.state;
+      // 轮询替换不算进场：本机亲历了这局，结算时照常记账
+      that.adoptCloudState(res.state, false);
       that.ui.detail = null;
       that.ui.selectedGems = [];
       that.ui.discardPlan = [];
@@ -18417,6 +18607,9 @@ Page({
       seats: seats,
       firstSeat: R.randomFirstSeat(seats.length)
     });
+    // 一局一条：房主生成一次，随快照下发，其他端不再各自生成。
+    // 重连 / 跨设备拿到同一份 gameId 时按它去重，不会重复记一条战绩。
+    this.state.gameId = newGameId();
     // 回合计时随房间配置下发，所有设备看到同一份限时
     this.state.turnLimit = R.normTurnLimit(this.room.turnLimit);
     this.state.themeId = T.roomId(this.room);

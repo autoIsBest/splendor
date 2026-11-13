@@ -399,13 +399,26 @@ eq(L.cloudToEntry(null), null, '脏行直接丢弃');
 
 function mockCloud(rows, fail) {
   const calls = [];
+  // 模拟真实表：upsert 会按 uid 覆盖写回，下一次 select 能读到自己刚写的行
+  const store = (rows || []).slice();
+  let uidFilter = null;
+  function visible() {
+    return uidFilter === null ? store.slice()
+      : store.filter(function (r) { return String(r.uid) === String(uidFilter); });
+  }
   const q = {
     from(t) { calls.push(['from', t]); return q; },
     upsert(row) {
       calls.push(['upsert', row]);
+      if (!fail) {
+        const i = store.findIndex(function (r) { return r.uid === row.uid; });
+        if (i >= 0) store[i] = Object.assign({}, row);
+        else store.push(Object.assign({}, row));
+      }
       return Promise.resolve(fail ? { error: { message: 'table missing' } } : { data: [row], error: null });
     },
     select() { calls.push(['select']); return q; },
+    eq(k, v) { calls.push(['eq', k, v]); if (k === 'uid') uidFilter = v; return q; },
     // 与真实 SDK 同签名：order(column, { ascending, nullsFirst })
     order(col, opt) {
       calls.push(['order', col, opt && opt.ascending]);
@@ -413,11 +426,11 @@ function mockCloud(rows, fail) {
     },
     limit(n) { calls.push(['limit', n]); return q; },
     then(resolve, reject) {
-      return Promise.resolve(fail ? { error: { message: 'boom' } } : { data: rows || [], error: null })
+      return Promise.resolve(fail ? { error: { message: 'boom' } } : { data: visible(), error: null })
         .then(resolve, reject);
     }
   };
-  return { cloud: { database: { from: function (t) { return q.from(t); } } }, calls: calls };
+  return { cloud: { database: { from: function (t) { return q.from(t); } } }, calls: calls, store: store };
 }
 
 async function runCloud() {
@@ -469,6 +482,65 @@ async function runCloud() {
   const iLimit = ordered.calls.findIndex(function (c) { return c[0] === 'limit'; });
   assert(iOrder >= 0 && iLimit > iOrder, 'order 必须先于 limit（先排序再截断）');
 
+  /* ---------- 增量发布：云端累计是权威值，绝不被本机小计覆盖 ---------- */
+  const oneGame = L.fromRecord({
+    mode: 'room', humanCount: 2, win: true, score: 16,
+    cards: 10, nobles: 1, turns: 20, turnAvgMs: 5000
+  });
+  eq(oneGame.games, 1, '一条战绩 = 一局增量');
+
+  // 云端已积累 20 局；本机明细因跨设备回补而来，大多不满足准入，只剩 1 局可读
+  const oldRow = L.entryToCloud(L.entryOf('u-a', '甲', '', {
+    games: 20, wins: 12, bestWinScore: 19, totalScore: 300,
+    totalCards: 180, totalNobles: 12, totalTurnMs: 600 * 4000, totalTurns: 600
+  }), 500);
+  const grown = mockCloud([oldRow], false);
+  const grownRes = await L.publish(grown.cloud, { uid: 'u-a', nickname: '甲', avatarData: '' }, oneGame);
+  eq(grownRes.ok, true, '云端已有旧行时增量发布成功');
+  const grownUp = grown.calls.filter(function (c) { return c[0] === 'upsert'; })[0][1];
+  eq(grownUp.games, 21, '20 局 + 本局 = 21 局，不能用本机 1 局覆盖回退');
+  eq(grownUp.total_score, 316, '总声望按增量累加');
+  eq(grownUp.best_win_score, 19, '最高胜场声望取 max，不因本局降低');
+  eq(grownUp.total_turns, 620, '有效耗时局的回合数累加');
+  eq(grownRes.games, 21, '返回值带合并后的局数');
+
+  const again = await L.publish(grown.cloud, { uid: 'u-a', nickname: '甲' }, oneGame);
+  eq(again.games, 22, '连续两局应累加成 22 局，不能又从 20 起算');
+
+  // 读失败时绝不写：拿本机小计覆盖云端正是这次要修的 bug
+  const readFailWrites = [];
+  const readFail = { cloud: { database: { from: function () {
+    const qq = {
+      select: function () { return qq; },
+      eq: function () { return qq; },
+      limit: function () { return qq; },
+      then: function (resolve) {
+        return Promise.resolve({ error: { message: 'boom' }, data: null }).then(resolve);
+      },
+      upsert: function (row) {
+        readFailWrites.push(row);
+        return Promise.resolve({ data: [row], error: null });
+      }
+    };
+    return qq;
+  } } } };
+  const rf = await L.publish(readFail.cloud, { uid: 'u-a' }, oneGame);
+  eq(rf.ok, false, '读云端行失败时不假装成功');
+  eq(rf.error, 'read-failed', '失败原因明确，便于上层诊断');
+  eq(readFailWrites.length, 0, '读失败时绝不发起 upsert，不回退云端累计');
+
+  /* 无效耗时不得污染速度项分母 */
+  const dirty = L.fromRecord({
+    mode: 'room', humanCount: 2, win: true, score: 16, turns: 101, turnAvgMs: 0
+  });
+  eq(dirty.games, 1, '脏局仍计入局数');
+  eq(dirty.totalTurns, 0, '无效耗时局的回合数不进分母');
+  eq(dirty.totalTurnMs, 0, '无效耗时局不记总耗时');
+  const mixed = L.mergeTotals(oneGame, dirty);
+  eq(mixed.totalTurns, 20, '混合后分母只含有效耗时局');
+  near(L.summarize(mixed).avgTurnSec, 5, '平均耗时不被 0.005s/行动拉低');
+
+  console.log('OK  增量发布 · 云端累计不回退 / 连续两局累加 / 读失败不写 / 伪耗时不进分母');
   console.log('OK  云端契约 · 独立表 / 字段映射 / 无云与报错均静默降级 / 无合格局不上榜 / 拉取有序');
 }
 

@@ -15,7 +15,10 @@
  *
  * 数据表：
  *   splendor_players(uid pk, nickname, avatar, avatar_url, stats jsonb, updated_at)
- *   splendor_records(id pk, uid, mode, player_count, rank, score, win, room_code, played_at)
+ *   splendor_records(id pk, uid, mode, player_count, rank, score, win, room_code, played_at, game_id)
+ *
+ * game_id 是「一局」的标识，随云端牌局快照下发；战绩按它去重，
+ * 重连 / 跨设备回到同一局时不会重复记一条，也不会把进场时刻当开局时刻。
  */
 
 const R = require('./room.js');
@@ -27,6 +30,8 @@ const RECORDS_OWNER_KEY = 'splendor.records-owner.v1';
 const RECORDS_PREFIX = 'splendor.records.v2.';
 const ACCOUNT_PREFIX = 'splendor.account.v1.';
 const IMPORT_PREFIX = 'splendor.record-import.v1.';
+/* 天梯榜「已落本地但还没确认发布到云端」的战绩 id 队列，按 uid 分区 */
+const PUBLISH_PREFIX = 'splendor.leaderboard-pending.v1.';
 const AVATAR_CACHE_KEY = 'splendor.avatars.v1';
 const PLAYER_TABLE = 'splendor_players';
 const RECORD_TABLE = 'splendor_records';
@@ -285,6 +290,9 @@ function addRecord(input, profile) {
     humanCount: src.humanCount === undefined
       ? undefined
       : Math.min(4, Math.max(0, Number(src.humanCount) || 0)),
+    // 本局唯一标识（来自 state.gameId）。老牌局 / 手工构造的 state 没有，
+    // 留空则退回只靠页面内 _resultRecorded 去重。
+    gameId: String(src.gameId || ''),
     at: Number(src.at) || Date.now(),
     roomCode: src.roomCode || '',
     opponents: (src.opponents || []).slice(0, 3)
@@ -294,6 +302,9 @@ function addRecord(input, profile) {
   // 统一按时间倒序：连胜统计与「最近对局」都依赖顺序，不能只看写入先后
   list.sort(function (a, b) { return b.at - a.at; });
   saveRecords(list);
+  // 先入「未确认发布」队列，再由页面层打包增量推榜；publish 成功才出队。
+  // 与 pushRecord 是否成功无关：战绩明细上云和天梯累计上云是两条独立链路。
+  markUnpublished(rec.id, rec.uid);
   pushRecord(rec);
   return rec;
 }
@@ -301,6 +312,53 @@ function addRecord(input, profile) {
 function clearRecords() {
   // 写空数组，避免删除分区后又从 v1 备份复活已清空的记录。
   saveRecords([]);
+}
+
+/* ---------- 一局一条的去重 + 天梯「未确认发布」队列 ---------- */
+
+/** 本 uid 是否已经记过这一局：重连 / 跨设备回到同一局时的幂等锚点 */
+function hasGameRecord(gameId) {
+  const gid = String(gameId || '');
+  if (!gid) return false;
+  // getRecords() 本身按当前 uid 分区，无需再传一次 uid 造成口径分叉
+  const list = getRecords();
+  for (let i = 0; i < list.length; i++) {
+    if (String(list[i].gameId || '') === gid) return true;
+  }
+  return false;
+}
+
+function publishKey(uid) {
+  return accountKey(PUBLISH_PREFIX, uid || R.getProfile().uid);
+}
+
+function markUnpublished(id, uid) {
+  if (!id) return;
+  const key = publishKey(uid);
+  const ids = readJSON(key) || [];
+  if (ids.indexOf(id) >= 0) return;
+  ids.push(id);
+  // 队列只服务于「还没确认发布」的局，长度与战绩上限对齐即可
+  writeJSON(key, ids.slice(-MAX_RECORDS));
+}
+
+/** 队列里仍存在于本机战绩的记录；被清掉 / 被 MAX_RECORDS 挤掉的自动剔除 */
+function unpublishedRecords(uid) {
+  const ids = readJSON(publishKey(uid)) || [];
+  if (!ids.length) return [];
+  const map = {};
+  ids.forEach(function (id) { map[id] = true; });
+  return getRecords().filter(function (r) { return !!map[r.id]; });
+}
+
+/** publish 成功后只清这次确实打包的 id，不动期间新结算的局 */
+function clearUnpublished(ids, uid) {
+  if (!ids || !ids.length) return;
+  const key = publishKey(uid);
+  const done = {};
+  ids.forEach(function (id) { done[id] = true; });
+  const rest = (readJSON(key) || []).filter(function (id) { return !done[id]; });
+  writeJSON(key, rest);
 }
 
 /** 汇总统计：界面顶部三格与战绩页总览都用它 */
@@ -559,7 +617,7 @@ async function pushRecord(rec) {
   if (!database || !rec || !rec.id) return { ok: false, offline: true };
   if (!ownsUid(rec.uid)) return { ok: false, stale: true };
   try {
-    const res = await database.from(RECORD_TABLE).upsert({
+    const row = {
       id: rec.id,
       uid: rec.uid || '',
       mode: rec.mode,
@@ -568,8 +626,18 @@ async function pushRecord(rec) {
       score: rec.score,
       win: !!rec.win,
       room_code: rec.roomCode || '',
+      // 一局一条的去重锚点；旧环境没这列时下面会降级重试
+      game_id: rec.gameId || '',
       played_at: nowIso(rec.at)
-    });
+    };
+    let res = await database.from(RECORD_TABLE).upsert(row);
+    // 云端表还没补 game_id（旧环境 / 平台侧重置过表）时不能让整条战绩上云失败。
+    // 去掉该列重试一次：跨设备去重能力降级，但明细本身不丢。
+    if (res && res.error && /column|schema|does not exist|42703|42P01/i.test(errText(res.error))) {
+      const legacy = Object.assign({}, row);
+      delete legacy.game_id;
+      res = await database.from(RECORD_TABLE).upsert(legacy);
+    }
     if (res && res.error) return { ok: false, error: errText(res.error) };
     return { ok: true };
   } catch (e) {
@@ -589,6 +657,10 @@ function rowToRecord(row) {
     win: !!row.win,
     tie: false,
     turns: 0,
+    // 云端明细行只存精简字段，humanCount / cards / nobles / turnAvgMs 一律缺失：
+    // 这些回补记录按「无法判定」处理，不进天梯准入，也不该参与速度项。
+    // game_id 单独补回，让跨设备回到同一局时仍能去重。
+    gameId: row.game_id || '',
     at: row.played_at ? new Date(row.played_at).getTime() : Date.now(),
     roomCode: row.room_code || '',
     opponents: []
@@ -790,6 +862,10 @@ module.exports = {
   getRecords: getRecords,
   addRecord: addRecord,
   clearRecords: clearRecords,
+  hasGameRecord: hasGameRecord,
+  markUnpublished: markUnpublished,
+  unpublishedRecords: unpublishedRecords,
+  clearUnpublished: clearUnpublished,
   statsOf: statsOf,
   rankTitle: rankTitle,
   recordList: recordList,

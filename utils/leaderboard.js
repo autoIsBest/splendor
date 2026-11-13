@@ -124,8 +124,12 @@ function fromRecord(rec) {
   t.totalScore = num(r.score);
   t.totalCards = num(r.cards);
   t.totalNobles = num(r.nobles);
-  t.totalTurns = turns;
-  t.totalTurnMs = Math.round(perTurn * turns);
+  // 只有「耗时有效」的局才参与速度项。旧记录 / 云端回补的行缺 turnAvgMs，
+  // 重连到已结束快照更是会算出 0.005s/行动这种伪耗时 —— 若仍把 turns 计进
+  // totalTurns，avgTurnSec 会被拉向 0，等于给这些局发满速度分。
+  // 宁可少一个耗时样本，也不能让分母失真：两项要么都记，要么都不记。
+  t.totalTurns = perTurn > 0 ? turns : 0;
+  t.totalTurnMs = perTurn > 0 ? Math.round(perTurn * turns) : 0;
   return t;
 }
 
@@ -265,21 +269,59 @@ function entryToCloud(entry, score) {
   };
 }
 
-/** 结算后把本机「全量累计」写进云端；失败静默降级，不影响结算面板 */
-async function publish(cloud, profile, totals) {
+/**
+ * 结算后把「本局增量」合并进云端累计行；失败静默降级，不影响结算面板。
+ * ------------------------------------------------------------------
+ * 为什么不能再用本机全量累计覆盖云端：
+ *   splendor_records 只存 9 列，跨设备回补到本地的记录缺 humanCount / cards /
+ *   nobles / turnAvgMs，一律不满足天梯准入。若拿 L.fromRecords(getRecords())
+ *   的结果 upsert，一台刚冷启动、明细几乎全是「不可判定」的设备会把云端
+ *   20 局的累计直接覆盖成 1 局 —— 榜单累计被静默回退。
+ *
+ * 所以发布口径改为「云端行是权威累计，本机只追加这一局的增量」：
+ *   读自己那一行 → mergeTotals(云端累计, 本局增量) → 写回。
+ *   这样既不回退、也不吞掉新局，且与本机明细是否完整无关。
+ *
+ * 读失败时宁可跳过本次发布，也不退回「全量覆盖」—— 后者正是要修的 bug。
+ * 不丢局由页面层的「未确认发布队列」保证：增量来自本地战绩，publish 成功
+ * 才清队列，失败则下次结算把积压的局一并重放。
+ *
+ * 幂等由页面层保证：一局只结算一次（gameId 去重 + _resultRecorded），
+ * publish 本身不做去重，重复调用会重复累加。
+ */
+async function publish(cloud, profile, delta) {
   try {
     const database = cloud && cloud.database;
     if (!database || !profile || !profile.uid) return { ok: false, error: 'no-cloud' };
-    // 没有任何合格对局就不上榜：否则「从没打过联机真人局的人」也会占一行 0 分，
-    // 榜单会被大量空行稀释。已有云端行的玩家若之后局数归零（清空战绩），
-    // 这里同样不会写回，云端旧行保持原样。
-    if (!num((totals || blank()).games)) return { ok: false, error: 'no-eligible-games' };
-    const entry = entryOf(profile.uid, profile.nickname,
-      profile.avatarData || '', totals || blank());
-    const score = rating(summarize(entry.totals));
-    const res = await database.from(LEADERBOARD_TABLE).upsert(entryToCloud(entry, score));
-    if (res && res.error) return { ok: false, error: String(res.error.message || res.error) };
-    return { ok: true, rating: score };
+    const d = delta || blank();
+    // 0 局不上榜：人机局 / 不合格局不写，也不发任何请求，
+    // 否则「从没打过联机真人局的人」会占一行 0 分，稀释榜单。
+    if (!num(d.games)) return { ok: false, error: 'no-eligible-games' };
+
+    let base = blank();
+    let res;
+    try {
+      let query = database.from(LEADERBOARD_TABLE).select('*');
+      // 老版本 SDK 没有 eq 时直接走降级，不要退化成整表拉取后瞎猜自己那行
+      if (typeof query.eq !== 'function') return { ok: false, error: 'read-failed' };
+      query = query.eq('uid', profile.uid);
+      if (typeof query.limit === 'function') query = query.limit(1);
+      res = await query;
+    } catch (e) {
+      return { ok: false, error: 'read-failed' };
+    }
+    if (!res || res.error || !Array.isArray(res.data)) return { ok: false, error: 'read-failed' };
+    if (res.data.length) {
+      const row = cloudToEntry(res.data[0]);
+      if (row) base = row.totals;
+    }
+
+    const merged = mergeTotals(base, d);
+    const entry = entryOf(profile.uid, profile.nickname, profile.avatarData || '', merged);
+    const score = rating(summarize(merged));
+    const up = await database.from(LEADERBOARD_TABLE).upsert(entryToCloud(entry, score));
+    if (up && up.error) return { ok: false, error: String(up.error.message || up.error) };
+    return { ok: true, rating: score, games: merged.games };
   } catch (e) {
     return { ok: false, error: String((e && e.message) || e) };
   }

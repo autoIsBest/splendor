@@ -1676,6 +1676,61 @@ console.log('OK  终局提示 · 指名达标者 / 剩余回合 / 结算后消�
       assert(st.players[page.mySeat].nickname === '新昵称保存', '保存后席位立即生效');
       console.log('OK  对局中资料 · 已有头像时改昵称不再被压缩失败拖死');
       page.profile = Object.assign({}, page.profile, { nickname: oldNick, avatar: oldAvatar });
+      /* ---------- 一局一条：进场已结束快照 / 复位记账状态 / 伪耗时 ---------- */
+      {
+        const Ux = require(ROOT + '/utils/user.js');
+        const Ex = require(ROOT + '/utils/game-engine.js');
+        const savedState = page.state;
+        const savedMode = page.mode;
+        const savedRecorded = page._resultRecorded;
+        const savedStarted = page._gameStartedAt;
+        const beforeN = Ux.getRecords().length;
+
+        // ① 进场撞上已结束快照：不补记战绩，也不把进场时刻当开局时刻
+        const ended = Ex.createGame({ playerCount: 2, seats: [{ isAI: false }, { isAI: false }] });
+        ended.gameId = 'g-enter-ended';
+        ended.gameOver = true; ended.winner = 0; ended.turnCount = 101;
+        page.state = null;
+        page._resultRecorded = false;
+        page._gameStartedAt = 123456;
+        page.adoptCloudState(ended, true);
+        assert(page._resultRecorded === true, '进场拿到已结束快照应阻止记账');
+        assert(page._gameStartedAt === 123456, '进场不应重置计时起点');
+        page.maybeRecordResult();
+        assert(Ux.getRecords().length === beforeN, '已结束快照不应补记一条战绩');
+
+        // ② 同一 gameId 被复位后仍不重复记（模拟冷启动 / 重连）
+        const dup = Ex.createGame({ playerCount: 2, seats: [{ isAI: false }, { isAI: false }] });
+        dup.gameId = 'g-dup-once';
+        dup.gameOver = true; dup.winner = page.mySeat || 0; dup.turnCount = 20;
+        page.mode = 'room';
+        page.state = dup;
+        page._resultRecorded = false;
+        page._gameStartedAt = Date.now() - 100000;
+        page.maybeRecordResult();
+        assert(Ux.getRecords().length === beforeN + 1, '第一次结算记一条');
+        page._resultRecorded = false;
+        page.maybeRecordResult();
+        assert(Ux.getRecords().length === beforeN + 1, '同一 gameId 复位后不得再记一条');
+
+        // ③ 505ms / 101 行动这种伪耗时必须归零
+        const dirty = Ex.createGame({ playerCount: 2, seats: [{ isAI: false }, { isAI: false }] });
+        dirty.gameId = 'g-dirty-ms';
+        dirty.gameOver = true; dirty.winner = page.mySeat || 0; dirty.turnCount = 101;
+        page.state = dirty;
+        page._resultRecorded = false;
+        page._gameStartedAt = Date.now() - 505;
+        page.maybeRecordResult();
+        const dirtyRec = Ux.getRecords().filter(function (r) { return r.gameId === 'g-dirty-ms'; })[0];
+        assert(dirtyRec && dirtyRec.turnAvgMs === 0,
+          '伪耗时应记 0，实际 ' + (dirtyRec && dirtyRec.turnAvgMs));
+
+        page.state = savedState;
+        page.mode = savedMode;
+        page._resultRecorded = savedRecorded;
+        page._gameStartedAt = savedStarted;
+        console.log('OK  一局一条 · 已结束快照不补记 / gameId 去重 / 伪耗时归零');
+      }
       page.onUnload();
       console.log('ALL RUNTIME CHECKS PASSED');
     } catch (e) {

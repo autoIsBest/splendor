@@ -309,6 +309,82 @@ async function run() {
     }
   });
 
+  /* ---------- 一局一条的去重锚点 + 天梯「未确认发布」队列 ---------- */
+  await checkAsync('战绩：gameId 去重 / 未发布队列 / 云端 game_id 与降级重试', async function () {
+    R.attachCloud(null);
+    U.clearRecords();
+    const uid = R.getProfile().uid;
+    // 前序用例可能留下队列，先清干净再计数
+    U.clearUnpublished(U.unpublishedRecords(uid).map(function (r) { return r.id; }), uid);
+
+    const recA = U.addRecord({ id: 'game-a', gameId: 'g-a', mode: 'room',
+      playerCount: 4, humanCount: 2, score: 16, win: true }, R.getProfile());
+    assert.equal(recA.gameId, 'g-a', 'addRecord 保留局标识');
+    assert.equal(U.hasGameRecord('g-a'), true, '同一局已记过');
+    assert.equal(U.hasGameRecord('g-b'), false, '别的局没记过');
+    assert.equal(U.hasGameRecord(''), false, '空标识不触发去重');
+
+    const pending = U.unpublishedRecords(uid);
+    assert.ok(pending.some(function (r) { return r.id === 'game-a'; }), '新增战绩自动入未发布队列');
+    const recB = U.addRecord({ id: 'game-b', gameId: 'g-b', mode: 'room',
+      playerCount: 4, humanCount: 2, score: 10, win: false }, R.getProfile());
+    assert.equal(U.unpublishedRecords(uid).length, pending.length + 1, '第二局也入队');
+
+    U.clearUnpublished(['game-a'], uid);
+    assert.ok(!U.unpublishedRecords(uid).some(function (r) { return r.id === 'game-a'; }),
+      'publish 成功后只清已发布的那一局');
+    assert.ok(U.unpublishedRecords(uid).some(function (r) { return r.id === 'game-b'; }),
+      '未发布的局保留，供下次结算重放');
+
+    // 云端明细带 game_id，跨设备拉回后仍能认出同一局
+    const mock = mockCloud();
+    R.attachCloud(mock);
+    await tick();
+    const pushed = await U.pushRecord(recB);
+    assert.equal(pushed.ok, true, '带 game_id 的战绩上行成功');
+    const row = mock._store.splendor_records.filter(function (r) { return r.id === 'game-b'; })[0];
+    assert.equal(row.game_id, 'g-b', '云端行写入 game_id');
+
+    mock._store.splendor_records.push({
+      id: 'remote-c', uid: uid, mode: 'room', player_count: 4,
+      rank: 2, score: 9, win: false, room_code: '', game_id: 'g-c',
+      played_at: new Date().toISOString()
+    });
+    const pulled = await U.pullRecords(uid);
+    assert.equal(pulled.ok, true);
+    const back = U.getRecords().filter(function (r) { return r.id === 'remote-c'; })[0];
+    assert.equal(back.gameId, 'g-c', '回补记录保留 game_id，可跨设备去重');
+    assert.equal(back.humanCount, undefined, '回补记录仍不伪造 humanCount（不进天梯准入）');
+    R.attachCloud(null);
+  });
+
+  await checkAsync('战绩上行：云端缺 game_id 列时降级重试，明细不丢', async function () {
+    let attempts = 0;
+    const writes = [];
+    const legacy = { database: { from: function () {
+      const q = {
+        upsert: function (row) {
+          writes.push(row);
+          return Promise.resolve(attempts++ === 0
+            ? { error: { message: 'column "game_id" of relation does not exist' }, data: null }
+            : { data: [row], error: null });
+        },
+        select: function () { return q; },
+        eq: function () { return q; },
+        then: function (resolve) { return Promise.resolve({ data: [], error: null }).then(resolve); }
+      };
+      return q;
+    } } };
+    R.attachCloud(legacy);
+    const res = await U.pushRecord({ id: 'x1', uid: R.getProfile().uid, mode: 'room',
+      playerCount: 4, rank: 1, score: 15, win: true, gameId: 'g-x', at: Date.now() });
+    assert.equal(res.ok, true, '列不存在时降级后仍成功');
+    assert.equal(writes.length, 2, '应重试一次');
+    assert.equal(writes[0].game_id, 'g-x', '第一次带 game_id');
+    assert.equal(writes[1].game_id, undefined, '重试时去掉新列');
+    R.attachCloud(null);
+  });
+
   console.log('ALL USER CHECKS PASSED');
 }
 
