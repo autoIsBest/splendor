@@ -1882,6 +1882,181 @@ console.log('OK  终局提示 · 指名达标者 / 剩余回合 / 结算后消�
           delete global.wx.vibrateShort;
           console.log('OK  UI/UX 规范 · 非法暗化 / +2 浮动增量 / wx.vibrateShort');
 
+          /* ---------- 超时立即代打：整回合一个计时 / 自动席位不进托管 / 单点权威 ---------- */
+          {
+            const Rx = require(ROOT + '/utils/room.js');
+            const seatRows = [
+              { index: 0, uid: page.profile.uid, name: '房主', nickname: '房主', isAI: false, joined: true, ready: true, type: 'self' },
+              { index: 1, uid: 'guest-a', name: '甲', nickname: '甲', isAI: false, joined: true, ready: true, type: 'remote' },
+              { index: 2, uid: 'guest-b', name: '乙', nickname: '乙', isAI: false, joined: true, ready: true, type: 'remote' }
+            ];
+            page.onLeaveRoom();
+            page.mode = 'room';
+            page.mySeat = 0;
+            page._cloudCode = '';
+            page.room = {
+              code: 'TIME01', mode: 'room', backend: 'local', status: 'lobby',
+              playerCount: 3, turnLimit: 10, seats: seatRows
+            };
+            page.beginRoomGame();
+            const st = page.state;
+
+            // 一个回合只该有一个计时起点：退还 / 挑贵族是同一回合的子步骤
+            const k0 = page.turnKeyOf(st);
+            st.pendingDiscard = 3;
+            assert(page.turnKeyOf(st) === k0, '退还子步骤不应重置回合计时');
+            st.pendingDiscard = 0;
+            st.pendingNoble = { seat: 0, options: [1, 2] };
+            assert(page.turnKeyOf(st) === k0, '多贵族挑选也不应重置回合计时');
+            st.pendingNoble = null;
+
+            // 机器人席位由 scheduleAi 硬编码驱动，不进入超时托管
+            st.current = 2;
+            st.players[2].isAI = true;
+            page._timeoutFired = false;
+            const botTurn = st.turnCount;
+            page.onTurnTimeout();
+            assert(st.turnCount === botTurn, '机器人席位不进入超时托管');
+            st.players[2].isAI = false;
+
+            // 别人超时：拨到刚好 10 秒（over=0）就必须立即打完整个回合，
+            // 旧实现在云端联机下还要再等 12 秒宽限（static.js 另有源码守卫）
+            st.current = 1;
+            st.turnLimit = 10;
+            const realNow3 = Date.now;
+            let fake3 = realNow3();
+            Date.now = function () { return fake3; };
+            page.resetTurnUI();
+            page.refresh('');
+            const beforeTimeout = st.turnCount;
+            fake3 += 10000;
+            page.tickClock();
+            Date.now = realNow3;
+            assert(page.state.turnCount > beforeTimeout,
+              '倒计时归 0 立即由 AI 打完整个回合并换手，不再等 12 秒');
+            assert(page.state.current !== 1 || page.state.gameOver, '代打后应换手');
+
+            // 单点权威：云端联机的非房主设备不本地推进，避免抢写与记错结算战绩
+            const origHasCloud = Rx.hasCloud;
+            Rx.hasCloud = function () { return true; };
+            page.mySeat = 1;
+            page.state.current = 0;
+            page.resetTurnUI();
+            page.refresh('');
+            page._timeoutFired = false;
+            const guestTurn = page.state.turnCount;
+            page.onTurnTimeout();
+            assert(page.state.turnCount === guestTurn, '云端非房主不得本地代打');
+            assert(page._timeoutFired === true, '非房主本回合只提示一次，不反复刷');
+            Rx.hasCloud = origHasCloud;
+            page.mySeat = 0;
+            console.log('OK  超时立即代打 · 整回合单计时 / 自动席位放行 / 房主单点权威');
+          }
+
+          /* ---------- 菜单「重新开始」：人机确认 / 联机投票 ---------- */
+          {
+            const origModal = global.wx.showModal;
+            let confirmVal = false;
+            global.wx.showModal = function (opt) { opt.success({ confirm: confirmVal }); };
+
+            // 人机局：取消确认不重开，确认才换局（用 gameId 判定，不用易变的字段）
+            page.onLeaveRoom();
+            page.mode = 'solo';
+            page.mySeat = 0;
+            page.startLocalGame();
+            const soloGid = page.state.gameId;
+            page._menuSuppressTapUntil = 0;
+            page.ui.menuOpen = true;
+            page.onMenuRestart();
+            assert(page.state.gameId === soloGid, '人机局取消确认不应重开');
+            confirmVal = true;
+            page.onMenuRestart();
+            assert(page.state.gameId !== soloGid, '人机局确认后应开新局');
+
+            // 联机局：3 位在场真人，房主发起投票
+            page.mode = 'room';
+            page.mySeat = 0;
+            page._cloudCode = '';
+            page.room = {
+              code: 'VOTE01', mode: 'room', backend: 'local', status: 'lobby',
+              playerCount: 3, turnLimit: 0,
+              seats: [
+                { index: 0, uid: page.profile.uid, name: '房主', nickname: '房主', isAI: false, joined: true, ready: true, type: 'self' },
+                { index: 1, uid: 'guest-a', name: '甲', nickname: '甲', isAI: false, joined: true, ready: true, type: 'remote' },
+                { index: 2, uid: 'guest-b', name: '乙', nickname: '乙', isAI: false, joined: true, ready: true, type: 'remote' }
+              ]
+            };
+            page.beginRoomGame();
+            page._menuSuppressTapUntil = 0;
+            page.onMenuRestart();
+            assert(page.state && !page.state.gameOver,
+              '联机菜单重开不得直接重置牌桌，应进入投票');
+            const vote = page.state.resetVote;
+            assert(vote && vote.status === 'open', '房主发起重开投票');
+            assert(vote.votes[page.profile.uid] === true, '发起人自动赞成');
+            assert(vote.gameId === page.state.gameId, '投票绑定本局 gameId');
+            page.refresh('');
+            const vm0 = page.data.resetVote;
+            assert(vm0 && vm0.rows.length === 3, '弹层列出三位在场真人');
+            assert(vm0.canAgree === false, '房主已投票，不再显示同意按钮');
+            assert(vm0.note.indexOf('1/3') > 0, '票数显示 1/3：' + vm0.note);
+
+            // 其余真人依次投票：第二人同意仍 open，第三人不同意立即否决
+            const realUid = page.profile.uid;
+            page.mySeat = 1; page.profile.uid = 'guest-a';
+            page.onResetVoteAgree();
+            assert(page.state.resetVote.votes['guest-a'] === true, '第二人同意');
+            assert(page.state.resetVote.status === 'open', '还有一人未投，保持 open');
+            page.mySeat = 2; page.profile.uid = 'guest-b';
+            page.onResetVoteReject();
+            assert(page.state.resetVote.status === 'rejected', '任一真人不同意立即否决');
+            assert(page.state.resetVote.rejectedBy === '乙', '记录否决者供弹层展示');
+            page.mySeat = 0; page.profile.uid = realUid;
+            page.refresh('');
+            assert(page.data.resetVote.status === 'rejected' && page.data.resetVote.canRestart === true,
+              '否决结果可见，房主可重新发起');
+
+            // 重新发起换 id，旧的「收起」状态不再生效
+            const rejectedId = page.state.resetVote.id;
+            page.onResetVoteRestart();
+            assert(page.state.resetVote.status === 'open', '房主可重新发起');
+            assert(page.state.resetVote.id !== rejectedId, '新投票换 id');
+
+            // 收起只对本次 open 有效
+            page.refresh('');
+            page.onCloseResetVote();
+            assert(page.data.resetVote === null, '收起后弹层隐藏');
+            page.onMenuRestart();
+            assert(page.data.resetVote && page.data.resetVote.status === 'open', '从菜单可重新展开投票');
+
+            // 其余真人全部同意 → 房主自动回大厅重新准备
+            page.state.resetVote.votes['guest-a'] = true;
+            page.state.resetVote.votes['guest-b'] = true;
+            page.state.resetVote.status = 'passed';
+            page.refresh('');
+            assert(page.ui.screen === 'room', '全员同意后房主自动回大厅');
+            assert(page.state === null, '回大厅后作废本局 state');
+
+            // 非房主不能发起
+            page.beginRoomGame();
+            page.mySeat = 1;
+            page._menuSuppressTapUntil = 0;
+            page.onMenuRestart();
+            assert(!page.state.resetVote, '非房主不能发起重开投票');
+            assert(page.ui.toast.indexOf('只有房主') >= 0, '提示仅房主可发起');
+            page.mySeat = 0;
+
+            // 换局失效：把旧投票挂到新 gameId 上，弹层不应再出现
+            const stale = { id: 'stale', gameId: 'other-game', byUid: realUid, byName: '房主', votes: {}, status: 'open' };
+            stale.votes[realUid] = true;
+            page.state.resetVote = stale;
+            page.refresh('');
+            assert(page.data.resetVote === null, '上一局的投票不应在新局显示');
+
+            global.wx.showModal = origModal;
+            console.log('OK  菜单重开 · 人机二次确认 / 发起门禁 / 同意否决 / 全员通过回大厅 / 换局失效');
+          }
+
           page.onUnload();
           console.log('ALL RUNTIME CHECKS PASSED');
         } catch (e2) {

@@ -202,6 +202,34 @@ if (/bindtap="onRoomKick"/.test(wxml)) {
   ok('房主移出按钮使用 catchtap（不冒泡触发整卡）');
 }
 
+// 7.6 超时「立即」：旧实现让倒计时归 0 后房主还要再等 12 秒才代打，
+// 代码与规则文案必须同时把这段宽限去掉，否则又会变成「算对了但没生效」。
+if (/over\s*<\s*12/.test(pageJs)) {
+  fail('超时路径不得再保留 12 秒二次宽限，倒计时归 0 必须立即代打');
+} else if (/宽限\s*12\s*秒/.test(wxml)) {
+  fail('规则文案仍在描述「宽限 12 秒后接管」，与代码不一致');
+} else {
+  ok('超时立即代打 · 无 12 秒宽限 / 规则文案同步');
+}
+
+// 7.7 重开投票：弹层按钮必须 catchtap，且预览构建必须注册这个新模块
+// （__def 是立即执行，漏注册会在浏览器预览里直接报 module not found）。
+if (!/wx:if="\{\{resetVote/.test(wxml)) fail('WXML 缺少重开投票弹层');
+['onResetVoteAgree', 'onResetVoteReject', 'onResetVoteRestart', 'onCloseResetVote']
+  .forEach(function (name) {
+    if (!new RegExp('catchtap="' + name + '"').test(wxml)) {
+      fail('投票弹层缺少 ' + name + ' 的 catchtap 绑定');
+    }
+  });
+if (!/catchtap="onMenuRestart"/.test(wxml) && !/onMenuRestart/.test(wxml)) {
+  fail('对局菜单缺少「重新开始」入口');
+}
+const buildJs = read('preview/build.js');
+if (!/\['reset-vote',\s*'utils\/reset-vote\.js'\]/.test(buildJs)) {
+  fail('preview/build.js 未注册 reset-vote 模块（预览会报 module not found）');
+}
+ok('重开投票 · 弹层渲染 / catchtap 绑定 / 预览模块已注册');
+
 // 8. 本地引用检查（require 路径）
 const reqRe = /require\(['"]([^'"]+)['"]\)/g;
 let qm;

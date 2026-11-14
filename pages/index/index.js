@@ -10,6 +10,7 @@ const C = require('../../utils/chat.js');
 const L = require('../../utils/leaderboard.js');
 const Nick = require('../../utils/nickname.js');
 const T = require('../../utils/theme.js');
+const V = require('../../utils/reset-vote.js');
 
 // 设计稿舞台尺寸（与参考截图比例一致），运行时等比缩放适配屏幕
 const DESIGN_W = 1080;
@@ -1370,6 +1371,76 @@ function clockVM(state, ui) {
   };
 }
 
+/**
+ * 重开投票弹层的视图模型。
+ * 投票数据来自云端牌局快照 state.resetVote，所有端读同一份，不需要额外
+ * 轮询房间行。昵称过滤沿用 displayName，号位换算沿用 E.seatNoOf —— 不
+ * 在这里造第二套展示口径（历史上「算对≠显示」吃过亏）。
+ */
+function resetVoteVM(state, ui, seat, profile, room) {
+  const vote = state && state.resetVote;
+  if (!vote || !room || room.mode !== 'room' || !V.isCurrent(vote, state)) return null;
+  const open = vote.status === 'open';
+  const key = vote.id + ':' + vote.status;
+  // 手动收起只对「这一次投票的当前状态」生效；key 含 status，
+  // 状态一变（open → rejected / passed）就自动重新弹出，不会漏掉结果
+  if (ui.resetVoteHiddenKey === key) return null;
+
+  const voters = V.votersOf(state);
+  const t = V.tally(vote, voters);
+  const myUid = String((profile && profile.uid) || '');
+  const myEntry = voters.filter(function (v) { return v.uid === myUid; })[0];
+  const myVote = vote.votes ? vote.votes[myUid] : undefined;
+  const isHost = (seat || 0) === 0;
+  const players = (state && state.players) || [];
+
+  const rows = voters.map(function (v) {
+    const p = players[v.seat] || {};
+    const val = vote.votes ? vote.votes[v.uid] : undefined;
+    const seatNo = E.seatNoOf(state, v.seat);
+    const tag = (v.uid === myUid ? ' · 我' : '') + (v.uid === vote.byUid ? ' · 发起人' : '');
+    return {
+      uid: v.uid,
+      seatNo: seatNo,
+      name: displayName(p, seatNo + ' 号位') + tag,
+      stateText: val === true ? '已同意' : (val === false ? '不同意' : '等待投票'),
+      cls: val === true ? 'is-agree' : (val === false ? 'is-reject' : 'is-pending')
+    };
+  });
+
+  let title = '房主提议重新开始';
+  let sub = '';
+  let note = '';
+  if (open) {
+    sub = (vote.byName || '房主') + ' 发起 · 其余在场真人全部同意后回大厅重新准备';
+    note = '已同意 ' + t.agreed + '/' + t.total + ' 人 · 任一真人不同意即取消本次重开';
+  } else if (vote.status === 'rejected') {
+    title = '重开已取消';
+    sub = (vote.rejectedBy || '有玩家') + ' 不同意，本次重开作废，牌局继续';
+    note = '房主可以重新发起一次投票';
+  } else if (vote.status === 'passed') {
+    title = '全员同意 · 正在回大厅';
+    sub = '所有在场真人都已同意，房主正在重置房间';
+    note = '请稍候，马上回到房间重新准备';
+  } else {
+    return null;
+  }
+
+  return {
+    id: vote.id,
+    status: vote.status,
+    title: title,
+    sub: sub,
+    note: note,
+    rows: rows,
+    canAgree: open && !!myEntry && myVote === undefined,
+    canReject: open && !!myEntry && myVote === undefined,
+    // 只有被否决后房主能重新发起；通过态房主正在回大厅，不该再给按钮
+    canRestart: vote.status === 'rejected' && isHost,
+    canClose: true
+  };
+}
+
 function buildViewModel(state, ui, layout, ctx) {
   const context = ctx || {};
   const room = context.room || null;
@@ -1433,6 +1504,7 @@ function buildViewModel(state, ui, layout, ctx) {
       roomCode: room ? room.code : '',
       roomMode: !!(room && room.mode === 'room'),
       roomBackend: room && room.backend === 'cloud' ? '云端同步' : '本机房间',
+      resetVote: null,
       rows: [],
       decks: [],
       bankPiles: [],
@@ -1859,6 +1931,7 @@ function buildViewModel(state, ui, layout, ctx) {
     roomCode: room ? room.code : '',
     roomMode: !!(room && room.mode === 'room'),
     roomBackend: room && room.backend === 'cloud' ? '云端同步' : '本机房间',
+    resetVote: resetVoteVM(state, ui, seat, profile, room),
     profileDialog: profileVM(ui, profile),
     playerDetail: ui.showPlayerDetail ? playerDetailVM(state, ui.detailSeat, room, seat, avatars) : null,
     showLobby: !!ui.showLobby,
@@ -2022,6 +2095,9 @@ function freshUI(config) {
     nobleDetailId: '',
     showRules: false,
     showReserved: false,
+    // 重开投票弹层：记录「哪一次投票的哪个状态」被用户手动收起。
+    // 状态变化（open → rejected/passed）会换 key，弹层自动重新出现。
+    resetVoteHiddenKey: '',
     // 好友体系：列表数据 + 弹层开关 + 加载/错误态
     showFriends: false,
     friends: [],
@@ -2537,6 +2613,10 @@ Page({
   refresh(toast) {
     // onLoad 期间的异步回调可能在 ui 初始化前返回
     if (!this.ui) return;
+    // 重开投票全员通过后，房主在这里收口回大厅。返回 true 表示它已经
+    // 触发过一次完整 refresh（backToLobby 内部），外层直接让位，别把
+    // 已经作废的牌桌又画一遍。
+    if (this.checkResetVotePassed()) return;
     // 联机快照会整份替换 state.players。资料是「本机账号的展示层数据」，
     // 每次渲染前幂等贴回自己席位，否则在牌桌里改昵称/头像后，下一次
     // 1.6s 轮询拉回旧快照就会把它打回原形 —— 这正是「对局中改资料不生效」。
@@ -2696,10 +2776,162 @@ Page({
     this.onToggleChatPanel();
   },
 
+  /**
+   * 菜单「重新开始」：人机局二次确认；联机局进入重开投票。
+   * 结算弹层的「再来一局」仍直接走 onRestart() —— 那不属于「对战中」，
+   * 且牌局已结束，再拦一次确认纯属打扰。
+   */
   onMenuRestart() {
     if (Date.now() < (this._menuSuppressTapUntil || 0)) return;
     this.ui.menuOpen = false;
-    this.onRestart();
+    if (this.mode !== 'room' || !this.room) {
+      const that = this;
+      const doRestart = function () { that.onRestart(); };
+      // 预览沙箱没有 wx.showModal：降级为直接执行，与移出/投降的口径一致
+      if (typeof wx === 'undefined' || !wx.showModal) { doRestart(); return; }
+      wx.showModal({
+        title: '重新开始？',
+        content: '当前这局会作废且不计入战绩，人数与机器人席位保持不变，重新开一局。',
+        confirmText: '重新开始',
+        cancelText: '继续对局',
+        success: function (res) { if (res.confirm) doRestart(); }
+      });
+      return;
+    }
+    this.openResetVote();
+  },
+
+  /**
+   * 联机局点「重新开始」：
+   *   · 已有投票 → 重新展开弹层（用户之前可能收起过），让本人投票
+   *   · 房主且无进行中投票 → 二次确认后发起
+   *   · 非房主且无投票 → 明确告知只有房主能发起
+   */
+  openResetVote() {
+    const st = this.state;
+    if (!st || st.gameOver) { this.refresh('本局已结束，用结算面板的「再来一局」即可'); return; }
+    const vote = st.resetVote;
+    if (vote && V.isCurrent(vote, st)) {
+      this.ui.resetVoteHiddenKey = '';
+      this.refresh(vote.status === 'open' ? '请完成重开投票' : '');
+      return;
+    }
+    if (this.mySeat !== 0) {
+      this.refresh('只有房主可以发起重开投票');
+      return;
+    }
+    const that = this;
+    const start = function () { that.startResetVote(); };
+    if (typeof wx === 'undefined' || !wx.showModal) { start(); return; }
+    wx.showModal({
+      title: '发起重开投票？',
+      content: '将向所有在场真人发起投票，全部同意后大家回到大厅重新准备。当前这局作废、不计战绩。',
+      confirmText: '发起投票',
+      cancelText: '取消',
+      success: function (res) { if (res.confirm) start(); }
+    });
+  },
+
+  /** 生成投票并写进快照；弹层里的「重新发起」直接走这里，不再叠一层确认。 */
+  startResetVote() {
+    const st = this.state;
+    if (!st || st.gameOver || this.mySeat !== 0) return;
+    if (!V.canStart(st.resetVote, true)) { this.refresh('已有进行中的重开投票'); return; }
+    const uid = (this.profile && this.profile.uid) || '';
+    const name = displayName(st.players[this.mySeat || 0], '房主');
+    this._resetVoteSeq = (this._resetVoteSeq || 0) + 1;
+    const id = 'v' + Date.now() + '-' + this._resetVoteSeq;
+    const now = Date.now();
+    this.writeResetVote(function (s) {
+      if (!V.canStart(s.resetVote, true)) return false;
+      const v = V.newVote(s, { byUid: uid, byName: name, id: id, now: now });
+      if (!v) return false;
+      s.resetVote = v;
+      return true;
+    }, '重开投票已发起');
+  },
+
+  onResetVoteAgree() { this.castResetVote(true); },
+  onResetVoteReject() { this.castResetVote(false); },
+  onResetVoteRestart() { this.startResetVote(); },
+
+  castResetVote(agree) {
+    const st = this.state;
+    if (!st || !st.resetVote || st.resetVote.status !== 'open') return;
+    const uid = (this.profile && this.profile.uid) || '';
+    const name = displayName(st.players[this.mySeat || 0], '玩家');
+    this.writeResetVote(function (s) {
+      if (!s.resetVote || !V.isCurrent(s.resetVote, s)) return false;
+      return V.cast(s.resetVote, s, uid, name, agree);
+    }, agree ? '已同意重开' : '已选择不同意，本次重开取消');
+  },
+
+  onCloseResetVote() {
+    const v = this.state && this.state.resetVote;
+    if (!v) return;
+    // 只收起这一次 open；状态一变（否决 / 通过）key 就不同，弹层会重新出现
+    this.ui.resetVoteHiddenKey = v.id + ':' + v.status;
+    this.refresh('');
+  },
+
+  /**
+   * 全员同意后由房主收口：回大厅重新准备。放在 refresh 最前面并用 id 去重，
+   * 避免「每帧都调 backToLobby」；返回 true 时外层 refresh 直接让位，
+   * 不再重复渲染一次已经作废的牌桌。
+   */
+  checkResetVotePassed() {
+    const v = this.state && this.state.resetVote;
+    if (!v || v.status !== 'passed' || this.mySeat !== 0) return false;
+    const key = String(v.id || '');
+    if (this._resetVoteHandled === key) return false;
+    this._resetVoteHandled = key;
+    this.backToLobby();
+    return true;
+  },
+
+  /**
+   * 把投票状态写进牌局快照。云端场景先拉最新快照再 CAS 提交、冲突重试两次；
+   * 本机房间 / 登录降级直接改本地 state。
+   * 必须基于「最新快照」而不是本地 state：投票期间别人可能刚出了一手，
+   * 拿旧 state 覆盖会把那一步动作抹掉 —— 这是快照型同步最容易踩的坑。
+   */
+  writeResetVote(mutator, message) {
+    const that = this;
+    const adopt = function (st) {
+      that.adoptCloudState(st, false);
+      that.ui.resetVoteHiddenKey = '';
+      that.refresh(message || '');
+    };
+    if (!R.hasCloud() || !this._cloudCode) {
+      if (!this.state) return;
+      if (!mutator(this.state)) { this.refresh('投票状态未变化'); return; }
+      adopt(this.state);
+      return;
+    }
+    const attempt = function (n) {
+      R.cloudPullGame(that._cloudCode).then(function (res) {
+        if (that._unloaded) return;
+        if (!res.ok || !res.state || res.state.lobby) {
+          that.refresh('云端牌局已更新，请重试');
+          return;
+        }
+        const st = res.state;
+        if (!mutator(st)) { that.refresh('投票状态未变化'); return; }
+        R.cloudPushState(that._cloudCode, st, res.version).then(function (saved) {
+          if (that._unloaded) return;
+          if (saved.ok) {
+            that._cloudVersion = saved.version;
+            adopt(st);
+          } else if (saved.conflict && n < 2) {
+            attempt(n + 1);
+          } else {
+            that.pollCloud(true);
+            that.refresh('投票同步失败，请重试');
+          }
+        }).catch(function () { that.refresh('投票同步失败，请重试'); });
+      }).catch(function () { that.refresh('投票同步失败，请重试'); });
+    };
+    attempt(0);
   },
 
   onMenuQuitGame() {
@@ -3006,9 +3238,16 @@ Page({
 
   /* ---------- 回合：号位提醒 + 限时 ---------- */
 
+  /**
+   * 「一手」的唯一标识 —— 只认回合数与当前席位。
+   * 旧实现把 pendingDiscard 拼进 key：一旦触发退还筹码 / 多贵族挑选，
+   * 换手检测就把这一步误判成新的一手，倒计时与 _timeoutFired 被重新置位，
+   * 已经超时的玩家又拿到一整段新限时，AI 迟迟不接管。一个回合只该有
+   * 一个计时起点，退还与挑选属于同一回合的子步骤，不重新计时。
+   */
   turnKeyOf(state) {
     if (!state) return '';
-    return state.turnCount + ':' + state.current + ':' + (state.pendingDiscard > 0 ? 'd' : '');
+    return state.turnCount + ':' + state.current;
   },
 
   /** 换手时重置倒计时并弹一次全屏提醒；由 refresh 与倒计时循环调用，本身不触发渲染 */
@@ -3069,7 +3308,10 @@ Page({
 
   /** 限时倒计时：每台设备按「自己看到换手的那一刻」起算，不依赖系统时钟对齐 */
   startClock() {
-    if (this.mode === 'room' && R.requiresWechatLogin() && !R.hasCloud()) return;
+    // 限时是房间配置，不该被「未登录」连带禁用：那种状态下云端请求全部
+    // offline，牌局实际只有本机一台设备，本地计时与 AI 代打都是安全的。
+    // 旧实现在这里按房间模式 + 未登录直接 return，让本机房间的限时档
+    // 完全失效（连倒计时都不出现）。
     if (this._clockTimer) return;
     if (this.ui.screen !== 'game') return;
     const st = this.state;
@@ -3094,6 +3336,7 @@ Page({
     this._turnKey = '';
     this._turnStartAt = 0;
     this._timeoutFired = false;
+    this._timeoutFailures = 0;
     this.ui.turnLeft = -1;
     this.ui.turnFlash = null;
   },
@@ -3115,31 +3358,53 @@ Page({
   },
 
   /**
-   * 超时托管：由机器人把「当前这一回合」完整打完并结束。
-   * 自己的回合：本机立刻接管，别让牌局卡在等一个人上。
-   * 别人的回合：云端只有房主在宽限 12 秒后接管，避免两台设备同时提交同一回合；
-   *             本机同屏多人没有第二台设备抢写，直接接管即可。
+   * 超时托管：倒计时归 0 的那一刻，立刻由 AI 把「当前这一回合」打完并结束。
+   *
+   * 谁会超时：只有在场的真人席位。机器人 / 空席 / 主动托管的席位由
+   * scheduleAi() 硬编码驱动，本来就不属于超时托管的范畴，这里直接放行。
+   *
+   * 单点权威：联机局只有房主设备代打并推快照，非房主不本地推进。否则
+   * 多台设备会各自用 AI 推演同一回合并 CAS 抢写；更糟的是非房主可能先
+   * 在本地算出 gameOver，抢在权威快照到达前记下一条不一致的结算战绩。
+   * 非房主只提示一次，随后由 1.6s 轮询拿到房主代打的结果（换手时
+   * syncTurnWatch 会自动清掉 _timeoutFired）。
+   *
+   * 这里刻意不做「再宽限 N 秒」：旧实现的房主二次等待 12 秒，让
+   * 「超时立即由机器人接管」变成超时十几秒后才动，与规则文案不符。
    */
   onTurnTimeout() {
     if (this._timeoutFired) return;
     const st = this.state;
-    if (!st || st.gameOver) return;
+    if (!st || st.gameOver || this.ui.screen !== 'game') return;
+    const actor = st.players[st.current] || {};
+    // 自动席位不叫超时：它们由 scheduleAi 驱动，倒计时只是陪同显示
+    if (actor.isAI || actor.autoPlay || (actor.type === 'remote' && !actor.joined)) return;
+
+    const cloudRoom = this.mode === 'room' && R.hasCloud();
+    if (cloudRoom && this.mySeat !== 0) {
+      this._timeoutFired = true;
+      this.refresh('对方超时 · 房主正在代为完成本回合');
+      return;
+    }
+
+    this._timeoutFired = true;
     const seat = this.mySeat || 0;
     const mine = st.current === seat;
-    const actor = st.players[st.current] || {};
-    if (!mine) {
-      if (actor.isAI) return;                      // 机器人席位由常规 scheduleAi 驱动，不重复接管
-      if (R.hasCloud()) {
-        if (this.mySeat !== 0) return;
-        const over = Math.floor((Date.now() - (this._turnStartAt || Date.now())) / 1000) - (Number(st.turnLimit) || 0);
-        if (over < 12) return;
-      }
-    }
-    this._timeoutFired = true;
     const label = mine ? '超时 · 机器人已代为完成本回合'
       : (actor.nickname || actor.name) + ' 超时 · 已代为完成本回合';
-    // 没推动回合就不能让 _timeoutFired 一直挂着：同一个 turnKey 将永远不再触发超时
-    if (!this.runForcedTurn(label)) this._timeoutFired = false;
+    const finished = this.runForcedTurn(label);
+    if (finished) {
+      this._timeoutFailures = 0;
+      return;
+    }
+    // 没推动回合就不能让 _timeoutFired 一直挂着：同一个 turnKey 将永远不再触发超时。
+    // 但也不能无限每 500ms 空转，连续失败就停表并明确告知玩家。
+    this._timeoutFired = false;
+    this._timeoutFailures = (this._timeoutFailures || 0) + 1;
+    if (this._timeoutFailures >= 3) {
+      this.stopClock();
+      this.refresh('超时托管未能推进，请从菜单重开或回大厅');
+    }
   },
 
   /**
@@ -3151,9 +3416,12 @@ Page({
    * 因此用 turnCount 是否推进作为「回合真正结束」的唯一判据。
    */
   runForcedTurn(message) {
-    if (this.mode === 'room' && R.requiresWechatLogin() && !R.hasCloud()) return false;
     const s = this.state;
     if (!s || s.gameOver) return false;
+    // 旧实现在这里按「房间模式 + 未登录」一刀切 return false。但那种状态下
+    // 云端请求全部 offline，牌局其实只有本机一台设备：pushCloudState() 会因
+    // hasCloud()=false 直接返回，本地推进不会与任何设备抢写。保留短路只会让
+    // 本机房间 / 登录降级时的限时局永远卡在超时那一刻。
     // 超时常发生在玩家选了一半筹码 / 退了一半筹码时，暂存选篮必须清空，
     // 否则下一次 refresh 会把旧计划带进新回合，一进牌桌就被误提交。
     this.ui.selectedGems = [];

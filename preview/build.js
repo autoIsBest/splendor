@@ -286,7 +286,10 @@ const moduleFiles = [
   ['user', 'utils/user.js'],
   ['friend', 'utils/friend.js'],
   ['chat', 'utils/chat.js'],
-  ['leaderboard', 'utils/leaderboard.js']
+  ['leaderboard', 'utils/leaderboard.js'],
+  // 零依赖纯数据层，放最后即可；__def 是立即执行，若它 require 了别的模块，
+  // 那些模块必须排在它前面（nickname 当初就是因为排末尾才报 module not found）
+  ['reset-vote', 'utils/reset-vote.js']
 ];
 
 const moduleDefs = moduleFiles.map(([name, file]) => (

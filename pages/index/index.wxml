@@ -971,9 +971,10 @@
           <text class="rule-item">4. 发展卡提供声望与永久红利；贵族牌在回合末自动判定，满足红利要求即 +3 声望。每人筹码上限 10 枚，预留卡上限 3 张。已预留的卡就铺在桌面左侧，随时可点开购买。</text>
           <text class="rule-item">5. 开局随机抽出 1 号位，其余按座次顺延编号，行动恒从 1 号位开始；有人达到 15 声望后打完本轮、由最后一号位收尾结算（4 人局即 4 号位）；若最后一号位自己达标则立即结算；同分时发展卡少者胜。</text>
           <text class="rule-item">6. 断线、切后台或重进小程序会自动回到原来的房间与座位；房主结束后房间失效，自动退回首页。</text>
-          <text class="rule-item">7. 房间可按 10 / 30 / 60 / 90 / 120 秒或不限时对局；超时回合由机器人强制打完并结束（含退还筹码）——自己超时本机接管，别人超时由房主在宽限 12 秒后接管。</text>
+          <text class="rule-item">7. 房间可按 10 / 30 / 60 / 90 / 120 秒或不限时对局；倒计时归 0 立即由机器人强制打完并结束整个回合（含退还筹码、贵族挑选）。联机局只由房主设备代打并同步给其他设备，避免多端抢写；机器人席位由系统自动行动，不进入超时托管。</text>
           <text class="rule-item">8. 回合末筹码超过 10 枚时，按官方规则可退还任意颜色的筹码（含黄金），同色可退多枚，只需退到 10 枚：重复点同一枚筹码即可累加，点筹码上的「−」逐枚撤回。</text>
           <text class="rule-item">9. 开局前房主可把已入席的真人「移出」房间，席位释放为「等待加入」，之后可再邀请别人或改为机器人；牌局开始后不再支持移出。被移出的玩家仍可用同一房间号重新加入。</text>
+          <text class="rule-item">10. 对局中菜单「重新开始」：人机对战需二次确认；联机对局由房主发起重开投票，其余在场真人全部同意后所有人回到大厅重新准备，当前这局作废且不计战绩；任一真人不同意即取消本次，房主可重新发起。机器人 / 空席 / 托管席位不参与投票。</text>
           <text class="rule-note">牌组为官方 90 张逐张对应（一级 40 / 二级 30 / 三级 20），贵族 10 张；卡面插画取自 Cleveland Museum of Art 开放获取（CC0）绘画，牌序每局随机。</text>
         </view>
         <view class="dialog-btns">
@@ -988,6 +989,30 @@
       <text class="end-notice-tag">终局</text>
       <text class="end-notice-text">{{endNotice.leaderSeat}} 号位 · {{endNotice.leaderName}} 已达 15 声望</text>
       <text class="end-notice-left">{{endNotice.leftText}}</text>
+    </view>
+
+    <!-- ========== 联机重开投票：状态随牌局快照同步，所有端看到同一份票 ========== -->
+    <view wx:if="{{resetVote && !gameOver}}" class="overlay" catchtap="noop">
+      <view class="dialog reset-vote-dialog" catchtap="noop">
+        <view class="dialog-head">
+          <text class="dialog-title">{{resetVote.title}}</text>
+          <text class="dialog-sub">{{resetVote.sub}}</text>
+        </view>
+        <view class="reset-vote-list">
+          <view wx:for="{{resetVote.rows}}" wx:key="uid" class="reset-vote-row {{item.cls}}">
+            <text class="reset-vote-seat">{{item.seatNo}} 号位</text>
+            <text class="reset-vote-name">{{item.name}}</text>
+            <text class="reset-vote-state">{{item.stateText}}</text>
+          </view>
+        </view>
+        <view class="dialog-btns">
+          <text class="dialog-action-note">{{resetVote.note}}</text>
+          <view wx:if="{{resetVote.canAgree}}" class="btn btn-primary" catchtap="onResetVoteAgree">同意重开</view>
+          <view wx:if="{{resetVote.canReject}}" class="btn btn-reject" catchtap="onResetVoteReject">不同意</view>
+          <view wx:if="{{resetVote.canRestart}}" class="btn btn-primary" catchtap="onResetVoteRestart">重新发起</view>
+          <view wx:if="{{resetVote.canClose}}" class="btn" catchtap="onCloseResetVote">收起</view>
+        </view>
+      </view>
     </view>
 
     <!-- ========== 结算 ========== -->

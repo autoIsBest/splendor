@@ -1463,6 +1463,32 @@ page, .viewport { width: 100vw; height: 100vh; overflow: hidden; }
 }
 .dialog-sub { font-size: 12px; color: #e2be9a; }
 .dialog-btns { display: flex; gap: 10px; justify-content: flex-end; align-items: center; margin-top: 16px; }
+/* 重开投票弹层：逐人票态清单。按钮沿用 .btn，只补危险色与列表排版；
+   overflow-y:auto 单独写，绝不与 overflow:hidden 并存（会静默裁掉票态行）。 */
+.reset-vote-dialog { width: 470px; }
+.reset-vote-list {
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 176px; overflow-y: auto;
+}
+.reset-vote-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 10px; border-radius: 8px;
+  border: 1px solid rgba(243, 212, 139, .28);
+  background: rgba(18, 8, 14, .42);
+}
+.reset-vote-seat { flex: 0 0 54px; color: #cda97e; font-size: 11px; }
+.reset-vote-name {
+  flex: 1; min-width: 0; color: #ffebb8; font-size: 12px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.reset-vote-state { flex: 0 0 auto; font-size: 11px; color: #d9bf9b; }
+.reset-vote-row.is-agree .reset-vote-state { color: #8fe0a8; }
+.reset-vote-row.is-reject .reset-vote-state { color: #ff9b9b; }
+.btn-reject {
+  border-color: rgba(255, 140, 140, .7);
+  color: #ffd2d2;
+  background: linear-gradient(180deg, rgba(120, 40, 46, .72), rgba(72, 20, 28, .82));
+}
 .dialog-action-note {
   flex: 1; min-width: 0;
   font-size: 11px; color: #cfa9b8; line-height: 1.4; text-align: left;

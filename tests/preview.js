@@ -940,5 +940,63 @@ console.log('四主题入口 / 三套主题房间与牌桌 / 退房恢复 OK');
   console.log('渲染层 · UI/UX 规范（防回弹 / 房间避让胶囊 / 非法暗化 / 浮动增量） OK');
 }
 
+/* ---------- 重开投票：H5 预览里真的渲染出来，不只是数据算对 ---------- */
+{
+  const d = run(1280, 720);
+  const p = d.page;
+  p.mode = 'room';
+  p.mySeat = 0;
+  p._cloudCode = '';
+  p.room = {
+    code: 'VOTE02', mode: 'room', backend: 'local', status: 'lobby',
+    playerCount: 3, turnLimit: 0,
+    seats: [
+      { index: 0, uid: p.profile.uid, name: '房主', nickname: '房主', isAI: false, joined: true, ready: true, type: 'self' },
+      { index: 1, uid: 'guest-a', name: '甲', nickname: '甲', isAI: false, joined: true, ready: true, type: 'remote' },
+      { index: 2, uid: 'guest-b', name: '乙', nickname: '乙', isAI: false, joined: true, ready: true, type: 'remote' }
+    ]
+  };
+  p.beginRoomGame();
+  p._menuSuppressTapUntil = 0;
+  // 预览沙箱没有 wx.showModal，走「降级直接执行」的同一条菜单接线
+  p.onMenuRestart();
+  const times = function (s, sub) { return s.split(sub).length - 1; };
+  let html = d.host.innerHTML;
+  assert(html.indexOf('reset-vote-dialog') > 0, '发起投票后应真实渲染弹层');
+  assert(html.indexOf('房主提议重新开始') > 0, '弹层标题应渲染');
+  assert(times(html, 'reset-vote-row') === 3, '三位在场真人各一行票态');
+  assert(times(html, 'reset-vote-row is-agree') === 1, '发起人自动赞成（票态行 class）');
+  assert(times(html, 'reset-vote-row is-pending') === 2, '其余两人等待投票');
+  assert(html.indexOf('data-catchtap="onResetVoteAgree"') === -1,
+    '已投过票的房主不应再看到同意按钮');
+  assert(html.indexOf('data-catchtap="onCloseResetVote"') > 0, '弹层应可收起');
+
+  // 换到第二位真人：同意 / 不同意两个按钮都该出现
+  const realUid = p.profile.uid;
+  p.mySeat = 1;
+  p.profile.uid = 'guest-a';
+  p.refresh('');
+  html = d.host.innerHTML;
+  assert(html.indexOf('data-catchtap="onResetVoteAgree"') > 0, '未投票真人应看到同意按钮');
+  assert(html.indexOf('data-catchtap="onResetVoteReject"') > 0, '未投票真人应看到不同意按钮');
+
+  // 否决 → 结果态重新弹出（收起 key 含 status，不会被旧 key 吞掉）
+  p.onCloseResetVote();
+  assert(d.host.innerHTML.indexOf('reset-vote-dialog') === -1, '收起后弹层隐藏');
+  p.onResetVoteReject();
+  assert(d.host.innerHTML.indexOf('重开已取消') > 0, '否决结果应重新弹出并渲染');
+  p.mySeat = 0;
+  p.profile.uid = realUid;
+  p.refresh('');
+  assert(d.host.innerHTML.indexOf('data-catchtap="onResetVoteRestart"') > 0, '房主应看到重新发起');
+
+  // 结算弹层出现时投票弹层不与之叠加
+  p.state.gameOver = true;
+  p.refresh('');
+  assert(d.host.innerHTML.indexOf('reset-vote-dialog') === -1, '结算时不应再叠一层投票弹层');
+  d.page.onUnload();
+  console.log('渲染层 · 重开投票（票态 / 按钮门禁 / 否决 / 收起 / 不与结算叠加） OK');
+}
+
 console.log('\nALL PREVIEW TESTS PASSED');
 process.exit(0);
