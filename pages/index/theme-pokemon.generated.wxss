@@ -36,6 +36,7 @@
 .theme-pokemon .tray-rim { background-image:none;background:linear-gradient(160deg,#194f43,#123b34);border:2px solid #d7dfa4;border-radius:12px; }
 .theme-pokemon .tray-rim::after { display:none; }
 .theme-pokemon .seat-badge, .theme-pokemon .turn-banner, .theme-pokemon .game-menu-dock, .theme-pokemon .game-menu-popover, .theme-pokemon .dialog, .theme-pokemon .room-top, .theme-pokemon .room-seat, .theme-pokemon .room-bottom, .theme-pokemon .id-stat, .theme-pokemon .count-chip, .theme-pokemon .timer-chip { background:linear-gradient(160deg,#194f43,#123b34);border-color:#d7dfa4;border-radius:12px; }
+.theme-pokemon .count-chip, .theme-pokemon .timer-chip { color:#fff9db;text-shadow:none; }
 .theme-pokemon .vault-sq, .theme-pokemon .seat-sq { background:linear-gradient(160deg,#194f43,#123b34);border-color:#d7dfa4; }
 .theme-pokemon .dialog, .theme-pokemon .room-seat { box-shadow:0 12px 32px rgba(5,25,26,.3),inset 0 0 0 3px rgba(130,180,163,.12); }
 .theme-pokemon .room-seat.is-self { background:linear-gradient(160deg,#194f43,#123b34); }
@@ -46,15 +47,15 @@
 .theme-pokemon .round-btn, .theme-pokemon .menu-dock-btn, .theme-pokemon .game-menu-ic { background:#194f43;color:#fff9db;border-color:#d7dfa4;text-shadow:none; }
 .theme-pokemon .menu-dock-icon, .theme-pokemon .menu-dock-label, .theme-pokemon .game-menu-title, .theme-pokemon .game-menu-item-title { color:#fff9db;text-shadow:none; }
 .theme-pokemon .game-menu-drag-tip, .theme-pokemon .menu-drag-grip text { color:#d6e8c8;text-shadow:none; }
-.theme-pokemon .menu-dock-btn.is-active { background:#f5cd56;border-color:#f5cd56; }
-.theme-pokemon .menu-dock-btn.is-active .menu-dock-icon, .theme-pokemon .menu-dock-btn.is-active .menu-dock-label { color:#243d28;text-shadow:none; }
+.theme-pokemon .menu-dock-btn.is-active, .theme-pokemon .menu-dock-btn.is-chat.is-active { background:#f5cd56;border-color:#f5cd56; }
+.theme-pokemon .menu-dock-btn.is-active .menu-dock-icon, .theme-pokemon .menu-dock-btn.is-active .menu-dock-label, .theme-pokemon .menu-dock-btn.is-chat.is-active .menu-dock-icon, .theme-pokemon .menu-dock-btn.is-chat.is-active .menu-dock-label { color:#243d28;text-shadow:none; }
 .theme-pokemon .game-menu-item.is-danger { background:rgba(138,42,46,.28);border-color:rgba(224,120,102,.48); }
 .theme-pokemon .game-menu-item.is-danger .game-menu-ic { background:radial-gradient(circle at 34% 26%,#8a3f46 0%,#4a1c26 65%,#24101a 100%);color:#ffd8c6;border-color:#e08a72; }
 .theme-pokemon .game-menu-item.is-danger .game-menu-item-title { color:#ffd9ce; }
 .theme-pokemon .portrait-frame, .theme-pokemon .room-avatar, .theme-pokemon .seat-avatar, .theme-pokemon .card, .theme-pokemon .noble { border-color:#d7dfa4; }
-.theme-pokemon .deck-lv-0 .deck-face { background-image:none;background:repeating-linear-gradient(45deg,transparent 0 7px,rgba(190,235,211,.1) 7px 8px),linear-gradient(160deg,#1b5b43,#0f3829); }
-.theme-pokemon .deck-lv-1 .deck-face { background-image:none;background:repeating-linear-gradient(45deg,transparent 0 7px,rgba(255,235,180,.1) 7px 8px),linear-gradient(160deg,#5a4e1c,#342c0d); }
-.theme-pokemon .deck-lv-2 .deck-face { background-image:none;background:repeating-linear-gradient(45deg,transparent 0 7px,rgba(180,220,255,.1) 7px 8px),linear-gradient(160deg,#1c4661,#0f2839); }
+.theme-pokemon .deck-lv-0 .deck-face { background-image:none;background:repeating-linear-gradient(45deg,transparent 0 7px,rgba(190,235,211,.14) 7px 8px),linear-gradient(160deg,#1b5b43,#0f3829); }
+.theme-pokemon .deck-lv-1 .deck-face { background-image:none;background:repeating-linear-gradient(45deg,transparent 0 7px,rgba(255,235,180,.14) 7px 8px),linear-gradient(160deg,#5a4e1c,#342c0d); }
+.theme-pokemon .deck-lv-2 .deck-face { background-image:none;background:repeating-linear-gradient(45deg,transparent 0 7px,rgba(180,220,255,.14) 7px 8px),linear-gradient(160deg,#1c4661,#0f2839); }
 .theme-pokemon .deck-crest { border-color:#d7dfa4;background:#123b34; }
 .theme-pokemon .card-photo, .theme-pokemon .noble-photo { filter:none; }
 .theme-pokemon .dialog-title, .theme-pokemon .room-status-main, .theme-pokemon .room-seat-name, .theme-pokemon .room-code-big, .theme-pokemon .id-name, .theme-pokemon .id-stat-num, .theme-pokemon .turn-main, .theme-pokemon .seat-name, .theme-pokemon .vault-label, .theme-pokemon .vault-total-text, .theme-pokemon .vault-total-num, .theme-pokemon .pick-kind, .theme-pokemon .pick-title, .theme-pokemon .pick-total-num, .theme-pokemon .room-theme, .theme-pokemon .room-counts-label, .theme-pokemon .room-code-label, .theme-pokemon .room-seat-label, .theme-pokemon .result-title, .theme-pokemon .result-detail, .theme-pokemon .result-crown, .theme-pokemon .rail-title, .theme-pokemon .reserved-tag-ch, .theme-pokemon .reserved-tag-num { color:#fff9db;text-shadow:none; }

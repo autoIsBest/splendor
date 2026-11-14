@@ -74,7 +74,12 @@ function tap(page, name, data) { return page[name]({ currentTarget: { dataset: d
 async function flush() { await new Promise(function (resolve) { setImmediate(resolve); }); }
 
 async function main() {
-  assert.deepStrictEqual(T.list().map(function (t) { return t.id; }), ['royal', 'pokemon', 'cyberpunk', 'ai']);
+  assert.deepStrictEqual(T.list().map(function (t) { return t.id; }), ['royal', 'pokemon', 'pixel', 'ai']);
+  assert.equal(T.has('cyberpunk'), false);
+  assert.equal(T.normalize('cyberpunk'), 'royal');
+  assert.equal(T.resolve('cyberpunk').fallback, true);
+  assert.equal(T.resolve('cyberpunk').id, 'royal');
+  assert.equal(T.resolve('cyberpunk').requestedId, 'cyberpunk');
   assert.equal(T.resolve('future-theme').fallback, true);
   assert.equal(T.resolve('future-theme').id, 'royal');
   assert.equal(T.resolve('royal').fallback, false);
@@ -90,10 +95,10 @@ async function main() {
   const originals = JSON.stringify(cards);
   const whiteFirst = cards.find(function (card) { return card.id === 'L1-01'; });
   assert.equal(T.cardName('pokemon', whiteFirst), '皮卡丘·初遇');
-  assert.equal(T.cardName('cyberpunk', whiteFirst), '雨夜集市·信标');
+  assert.equal(T.cardName('pixel', whiteFirst), '跳跳勇者·关卡');
   assert.equal(T.cardName('ai', whiteFirst), 'GPT·提示');
   assert.equal(T.nobleTitle('ai', D.NOBLE_POOL[2]), 'Grok·导师');
-  for (const id of ['pokemon', 'cyberpunk', 'ai']) {
+  for (const id of ['pokemon', 'pixel', 'ai']) {
     const names = cards.map(function (card) { return T.cardName(id, card); });
     assert.equal(new Set(names).size, 90, id + ' needs 90 distinct card names');
     const nobleNames = D.NOBLE_POOL.map(function (noble) { return T.nobleTitle(id, noble); });
@@ -123,7 +128,7 @@ async function main() {
   console.log('PASS 90 distinct themed card names, ten noble titles, legacy log rendering and canonical data isolation');
 
   const baseline = E.createGame({ playerCount: 2, rand: D.mulberry32(430) });
-  for (const id of ['pokemon', 'cyberpunk', 'ai']) {
+  for (const id of ['pokemon', 'pixel', 'ai']) {
     const themed = E.createGame({ playerCount: 2, rand: D.mulberry32(430) });
     themed.themeId = id;
     const control = JSON.parse(JSON.stringify(baseline));
@@ -140,7 +145,7 @@ async function main() {
   const cloud = mockCloud();
   R.attachCloud(cloud);
   const host = R.saveProfile({ nickname: 'Theme host' });
-  for (const id of ['pokemon', 'cyberpunk', 'ai']) {
+  for (const id of ['pokemon', 'pixel', 'ai']) {
     const seats = R.makeSeats(3, { 2: true }, host);
     const room = R.createRoom({ profile: host, playerCount: 3, seats: seats, themeId: id });
     assert.equal(room.themeId, id);
@@ -168,6 +173,8 @@ async function main() {
   const legacyRow = cloud.store.splendor_rooms.find(function (r) { return r.code === legacy.code; });
   delete legacyRow.seats[0].roomThemeId;
   assert.equal((await R.cloudPullRoom(legacy.code)).room.themeId, 'royal');
+  legacyRow.seats[0].roomThemeId = 'cyberpunk';
+  assert.equal(T.resolve((await R.cloudPullRoom(legacy.code)).room.themeId).fallback, true);
   legacyRow.seats[0].roomThemeId = 'future-theme';
   assert.equal(T.resolve((await R.cloudPullRoom(legacy.code)).room.themeId).fallback, true);
   console.log('PASS strict deployed-schema transport, joining, ready, start, reconnect, reset and legacy rooms');
@@ -180,7 +187,7 @@ async function main() {
   assert.equal(page.data.themeId, 'royal', 'building a draft must not recolor the lobby');
   page.onCloseHomeDialog();
   assert.equal(page.ui.roomThemeId, 'royal', 'cancel restores creation draft');
-  for (const id of ['pokemon', 'cyberpunk', 'ai']) {
+  for (const id of ['pokemon', 'pixel', 'ai']) {
     tap(page, 'onOpenHomeDialog', { kind: 'create' });
     tap(page, 'onSelectRoomTheme', { id: id });
     page.onCreateRoom();
@@ -264,18 +271,18 @@ async function main() {
   failingCloud.failCreate = true;
   const retryPage = pageRuntime();
   tap(retryPage, 'onOpenHomeDialog', { kind: 'create' });
-  tap(retryPage, 'onSelectRoomTheme', { id: 'cyberpunk' });
+  tap(retryPage, 'onSelectRoomTheme', { id: 'pixel' });
   retryPage.onCreateRoom();
   await flush();
   const originalCode = retryPage.room.code;
   assert(retryPage.ui.roomCreateFailed);
   assert.equal(retryPage.data.roomScreen.canStart, false);
-  assert.equal(retryPage.data.themeId, 'cyberpunk');
+  assert.equal(retryPage.data.themeId, 'pixel');
   retryPage.onRetryCreateRoom();
   await flush();
   assert.equal(retryPage.room.code, originalCode, 'retry must reuse the same room code');
   assert.equal(retryPage.ui.roomCreateFailed, false);
-  assert.equal((await R.cloudPullRoom(originalCode)).room.themeId, 'cyberpunk');
+  assert.equal((await R.cloudPullRoom(originalCode)).room.themeId, 'pixel');
   retryPage.onUnload();
   const acceptedCloud = mockCloud();
   R.attachCloud(acceptedCloud);

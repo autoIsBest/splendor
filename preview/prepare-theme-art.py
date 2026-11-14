@@ -23,22 +23,26 @@ TILE = 144          # 单格边长，3 格合计 432
 QUALITY = 52
 SUBSAMPLING = 2     # 4:2:0，深色渐变下未见色带
 
+ALL_THEMES = ("pokemon", "cyberpunk", "ai", "pixel")
+ACTIVE_THEMES = ("pokemon", "ai", "pixel")
+
 source = Path(sys.argv[1])
-themes = sys.argv[2:] or ("pokemon", "cyberpunk", "ai")
-if any(theme not in ("pokemon", "cyberpunk", "ai") for theme in themes):
-    raise SystemExit("Unknown theme; choose pokemon, cyberpunk or ai")
+themes = sys.argv[2:] or ACTIVE_THEMES
+if any(theme not in ALL_THEMES for theme in themes):
+    raise SystemExit("Unknown theme; choose pokemon, cyberpunk, ai or pixel")
 output = Path(__file__).resolve().parent / "thumbs" / "themes"
 output.mkdir(parents=True, exist_ok=True)
 
 for theme in themes:
     image = Image.open(source / f"splendor-{theme}-atlas.png").convert("RGB")
     atlas = Image.new("RGB", (TILE * 3, TILE * 3))
+    margin = 6 if theme == "pixel" else 3
     for row in range(3):
         for col in range(3):
-            box = (round(col * image.width / 3) + 3,
-                   round(row * image.height / 3) + 3,
-                   round((col + 1) * image.width / 3) - 3,
-                   round((row + 1) * image.height / 3) - 3)
+            box = (round(col * image.width / 3) + margin,
+                   round(row * image.height / 3) + margin,
+                   round((col + 1) * image.width / 3) - margin,
+                   round((row + 1) * image.height / 3) - margin)
             tile = image.crop(box).resize((TILE, TILE), Image.Resampling.LANCZOS)
             atlas.paste(tile, (col * TILE, row * TILE))
     target = output / f"{theme}.jpg"

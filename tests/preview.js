@@ -859,9 +859,11 @@ console.log('完整对局 ' + steps + ' 步 + 结算后重绘 OK');
 // Exercise the compiled template/module bundle for every new room theme.
 const themesPreview = run(844, 390);
 const tp = themesPreview.page;
-['pokemon', 'cyberpunk', 'ai'].forEach(function (id) {
+['pokemon', 'pixel', 'ai'].forEach(function (id) {
   tp.onOpenHomeDialog({ currentTarget: { dataset: { kind: 'create' } } });
   assert((themesPreview.host.innerHTML.match(/data-tap="onSelectRoomTheme"/g) || []).length === 4, '建房须提供四套主题');
+  assert(themesPreview.host.innerHTML.indexOf('theme-thumb-pixel') > 0, '建房应展示红白机像素主题入口');
+  assert(themesPreview.host.innerHTML.indexOf('theme-thumb-cyberpunk') < 0, '赛博朋克主题已暂时停用');
   tp.onSelectRoomTheme({ currentTarget: { dataset: { id: id } } });
   tp.onCreateRoom();
   assert(themesPreview.host.innerHTML.indexOf('viewport theme-' + id) > 0, '房间根容器应应用所选主题');

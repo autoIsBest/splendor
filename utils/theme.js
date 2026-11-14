@@ -5,20 +5,28 @@ const DEFAULT_ID = 'royal';
 const THEMES = [
   { id: 'royal', name: '皇家商会', tag: 'RENAISSANCE', description: '酒红丝绒 · 鎏金画框 · 古典油画' },
   { id: 'pokemon', name: '宝可梦', tag: 'POKEMON', description: '伙伴冒险 · 明亮草地 · 训练师卡册' },
-  { id: 'cyberpunk', name: '赛博朋克', tag: 'NIGHT CITY', description: '雨夜街区 · 霓虹线路 · 铬金属' },
+  { id: 'pixel', name: '红白机像素', tag: '8-BIT FAMICOM', description: '轻快像素 · 经典红白机 · 卡带冒险' },
+  // { id: 'cyberpunk', name: '赛博朋克', tag: 'NIGHT CITY', description: '雨夜街区 · 霓虹线路 · 铬金属' }, // 暂时停用
   { id: 'ai', name: 'AI 大模型拟人', tag: 'MODEL PERSONAS', description: '模型化身 · 角色档案 · 晶白实验室' }
 ];
 const CAPTIONS = {
   pokemon: ['皮卡丘', '妙蛙种子', '杰尼龟', '小火龙', '伊布', '可达鸭', '卡比兽', '快龙', '耿鬼'],
+  pixel: ['跳跳勇者', '蘑菇草坡', '星际战机', '彩砖工坊', '史莱姆', '坦克堡垒', '天空飞艇', '像素骑士', '红白主机'],
   cyberpunk: ['雨夜集市', '义体信使', '高架航线', '服务器圣殿', '红区黑客', '城市蜂群', '疾速骑手', '生态穹顶', '信号乌鸦'],
   ai: ['GPT', 'Claude', 'Gemini', 'DeepSeek', 'Qwen', 'Grok', 'Llama', 'GLM', '豆包']
 };
 const CARD_VARIANTS = {
   pokemon: ['初遇', '同行', '野营', '特训', '羁绊', '冠军', '探险', '远行', '协作', '进阶', '巅峰', '传说'],
+  pixel: ['关卡', '金币', '加命', '跳台', '秘道', '宝箱', '道具', '连击', '通关', '隐藏', '星币', '无敌'],
   cyberpunk: ['信标', '中继', '潜入', '网关', '矩阵', '觉醒', '暗线', '脉冲', '协议', '零日', '超频', '奇点'],
   ai: ['提示', '检索', '推理', '编排', '校准', '涌现', '对话', '记忆', '协作', '规划', '对齐', '智核']
 };
-const NOBLE_RANKS = { pokemon: ['徽章', '殿堂'], cyberpunk: ['董事', '议长'], ai: ['导师', '首席'] };
+const NOBLE_RANKS = {
+  pokemon: ['徽章', '殿堂'],
+  pixel: ['达人', '冠军'],
+  cyberpunk: ['董事', '议长'],
+  ai: ['导师', '首席']
+};
 let catalog;
 
 function getCatalog() {

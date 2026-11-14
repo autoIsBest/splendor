@@ -1,7 +1,7 @@
 @import "art.wxss";
 @import "theme-picker.wxss";
 @import "theme-pokemon.generated.wxss";
-@import "theme-cyberpunk.generated.wxss";
+@import "theme-pixel.generated.wxss";
 @import "theme-ai.generated.wxss";
 
 /* ==================================================================
