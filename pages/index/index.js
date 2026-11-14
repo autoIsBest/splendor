@@ -14,11 +14,36 @@ const T = require('../../utils/theme.js');
 // 设计稿舞台尺寸（与参考截图比例一致），运行时等比缩放适配屏幕
 const DESIGN_W = 1080;
 const DESIGN_H = 560;
+// 悬浮菜单停靠尺寸与默认安全位置（舞台右下角工作台外侧，避开微信右上角胶囊与所有牌桌元素）
+const MENU_DEFAULT_X = 1014;
+const MENU_DEFAULT_Y = 422;
+const MENU_DOCK_W = 56;
+const MENU_DOCK_H = 128;
+
+function haptic(type) {
+  if (typeof wx === 'undefined' || !wx.vibrateShort) return;
+  try { wx.vibrateShort({ type: type || 'light' }); } catch (e) {}
+}
 const GEMS = D.GEMS;
 const ALL = D.ALL_TOKENS;
 const META = D.GEM_META;
 // 终局线：声望达到 15 触发最后一轮。界面按真实数值渲染，不在此截断
 const FINAL_POINTS = 15;
+
+function clampMenuPos(x, y) {
+  const nx = typeof x === 'number' && isFinite(x) ? Math.round(x) : MENU_DEFAULT_X;
+  const ny = typeof y === 'number' && isFinite(y) ? Math.round(y) : MENU_DEFAULT_Y;
+  return {
+    x: Math.max(10, Math.min(DESIGN_W - MENU_DOCK_W - 10, nx)),
+    y: Math.max(10, Math.min(DESIGN_H - MENU_DOCK_H - 10, ny))
+  };
+}
+
+function menuDirClassOf(x, y) {
+  const dx = x > DESIGN_W * 0.5 ? 'open-left' : 'open-right';
+  const dy = y > DESIGN_H * 0.4 ? 'open-up' : 'open-down';
+  return dx + ' ' + dy;
+}
 
 /**
  * 每次行动耗时的可信下限。
@@ -378,6 +403,7 @@ function pickVM(state, ui, seat, takeError, needDiscard) {
     arrow: '→',
     items: [],
     gain: gainColumns(sel, 0),
+    dots: gainColumns(sel, 0).filter(function (g) { return g.show; }),
     hasGain: sel.length > 0,
     canSubmit: false,
     reason: takeError || '',
@@ -393,7 +419,7 @@ function pickVM(state, ui, seat, takeError, needDiscard) {
     const plan = ui.discardPlan || [];
     out.mode = 'discard';
     out.kind = '退还筹码';
-    out.title = plan.length ? '本次退还：' + gemsText(tallyGems(plan)) : '点击下方自己的筹码选择要退还的筹码';
+    out.title = '';
     out.lines = [];
     out.gain = gainColumns([], 0);
     out.hasGain = plan.length > 0;
@@ -402,6 +428,7 @@ function pickVM(state, ui, seat, takeError, needDiscard) {
       it.sign = '−' + it.count;
       return it;
     });
+    out.dots = out.items;
     out.discardPicked = plan.slice();
     out.discardPlan = plan.length;
     out.discardLeft = state.pendingDiscard;
@@ -446,6 +473,7 @@ function pickVM(state, ui, seat, takeError, needDiscard) {
         return l;
       });
       out.items = paidLines;
+      out.dots = paidLines;
       out.goldLine = pay.gold ? '黄金替代 ' + pay.gold + ' 枚（缺口用万能筹码补足）' : '';
       out.fromText = String(total);
       out.toText = String(total - paid);
@@ -463,6 +491,7 @@ function pickVM(state, ui, seat, takeError, needDiscard) {
       out.title = T.cardName(state.themeId, card) + ' · 预留后名额 ' + (p.reserved.length + 1) + '/3';
       out.lines = [{ key: 'gold', label: '黄金', count: getGold, gemClass: 'gem-gold', isGold: true, sign: '+' + getGold, positive: true }];
       out.items = getGold ? out.lines : [];
+      out.dots = out.items;
       out.goldLine = getGold ? '预留附赠 1 枚黄金万能筹码' : '银行黄金已发完，本次预留不再附赠黄金';
       out.fromText = String(total);
       out.toText = String(total + getGold);
@@ -487,7 +516,8 @@ function pickVM(state, ui, seat, takeError, needDiscard) {
     out.kind = '购买发展卡';
     out.title = T.cardName(state.themeId, card) + ' · 暂不可购买';
     out.lines = [];
-    out.items = [];
+      out.items = [];
+      out.dots = [];
     out.goldLine = '';
     out.fromText = String(total);
     out.toText = String(total);
@@ -500,8 +530,8 @@ function pickVM(state, ui, seat, takeError, needDiscard) {
     return out;
   }
 
-  // ④ 默认：本次拿取筹码
-  out.title = sel.length ? '本次拿取：' + gemsText(tallyGems(sel)) : '未选择筹码';
+  // ④ 默认：本次拿取筹码（色点与 +n 标记已直观表达所选筹码，不再重复输出冗长文字）
+  out.title = '';
   out.fromText = String(total);
   out.toText = String(total + sel.length);
   out.delta = sel.length;
@@ -687,7 +717,9 @@ function playerDetailVM(state, index, room, selfSeat, avatars) {
     avatar: seat.avatar,
     avatarUrl: seat.avatarUrl,
     avatarHue: seat.avatarHue,
+    initial: seat.initial,
     isBot: seat.isBot,
+    autoPlay: seat.autoPlay,
     points: p.points,
     cardCount: p.cards.length,
     reservedCount: p.reserved.length,
@@ -1047,7 +1079,9 @@ function profileVM(ui, profile) {
     // 用户在输入框里看到「*爸」会以为自己输错了，也没法正常编辑。
     // 过滤只发生在公开展示处（榜单/席位/聊天/结算）。
     nickname: draft.nickname || '',
+    initial: String(draft.nickname || '珠宝商').slice(0, 1),
     avatarUrl: draft.avatarUrl || '',
+    avatarHue: avatarHue(draft.avatar || 'a0'),
     avatarName: draft.avatarUrl ? '微信头像' : R.avatarName(draft.avatar),
     avatars: avatars,
     nicknames: ['珠宝商', '宝石收藏家', '贸易行会', '威尼斯商人'],
@@ -1350,14 +1384,21 @@ function buildViewModel(state, ui, layout, ctx) {
   const canNativeAvatar = !!(typeof wx !== 'undefined' && wx.canIUse &&
     wx.canIUse('button.open-type.chooseAvatar'));
 
+  const menuPos = clampMenuPos(ui.menuX, ui.menuY);
+  const menuDirClass = menuDirClassOf(menuPos.x, menuPos.y);
+  const safeChatTop = Math.max(82, (layout.topRight || 10) + 10);
+
   if (screen !== 'game' || !state) {
     return {
       stageScale: layout.scale,
       stageRotate: layout.rotate,
       topRightTop: layout.topRight || 10,
-      topRightCollapsed: !!ui.topRightCollapsed,
-      topRightToggleLabel: ui.topRightCollapsed ? '☰' : '×',
-      chatPanelTop: (layout.topRight || 10) + 44,
+      menuOpen: false,
+      menuX: menuPos.x,
+      menuY: menuPos.y,
+      menuDirClass: menuDirClass,
+      menuToggleLabel: '菜单',
+      chatPanelTop: safeChatTop,
       // 非牌桌屏也要声明 chat：WXML 根变量缺声明会被静态校验拦下，
       // 且 setData 不带 chat 时 wx:for 遍历 undefined 会在部分 WebView 里报错
       chat: C.chatVM([], seat, Date.now(), false, 'text', {
@@ -1402,6 +1443,7 @@ function buildViewModel(state, ui, layout, ctx) {
       reservedCards: [],
       emptyReservedSlots: [],
       detail: null,
+      nobleDetail: null,
       gameOver: false,
       isMyTurn: false,
       needDiscard: false,
@@ -1413,7 +1455,7 @@ function buildViewModel(state, ui, layout, ctx) {
       meAutoPlay: false,
       canAutoPlay: false,
       pick: {
-        mode: 'take', kind: '拿取筹码', title: '', lines: [], items: [], gain: [],
+        mode: 'take', kind: '拿取筹码', title: '', lines: [], items: [], gain: [], dots: [],
         hasGain: false, fromText: '0', toText: '0', delta: 0, arrow: '→',
         goldLine: '', canSubmit: false, reason: '', label: '确认拿取',
         pending: false, discardPicked: [], discardLeft: 0, discardPlan: 0
@@ -1432,12 +1474,17 @@ function buildViewModel(state, ui, layout, ctx) {
       resultBoard: null,
       endNotice: null,
       showcaseList: [],
+      floatScoreDeltas: [],
+      floatTokenDeltas: [],
       turnFlash: null,
       turnClock: { on: false, text: '', left: 0, total: 0, pct: 0, urgent: false },
       nobleChoice: null,
       meSeatNo: seat + 1,
       meSeatLabel: (seat + 1) + ' 号位',
-      me: { name: '', points: 0, totalTokens: 0, reservedCount: 0, tokens: [], discounts: [], discountCells: [] },
+      me: {
+        name: '', points: 0, totalTokens: 0, reservedCount: 0, cardCount: 0, nobleCount: 0,
+        avatarUrl: '', avatarHue: '', initial: '珠', tokens: [], discounts: [], discountCells: []
+      },
       rival: { name: '', points: 0, cardCount: 0, reservedCount: 0, tokens: [] }
     };
   }
@@ -1496,6 +1543,7 @@ function buildViewModel(state, ui, layout, ctx) {
     });
   }
 
+  const isSelPair = sel.length === 2 && sel[0] === sel[1];
   const bankPiles = ALL.map(function (g, i) {
     const count = state.bank[g];
     const picked = countIn(sel, g);
@@ -1512,6 +1560,12 @@ function buildViewModel(state, ui, layout, ctx) {
     }
     const topDx = layers > 1 ? (((layers + i) % 3 - 1) * 0.9) : 0;
     const topStyle = 'transform:translate(' + topDx.toFixed(1) + 'px,0px) scaleY(0.76) skewX(4deg);';
+    const illegal = isMyTurn && !needDiscard && !state.pendingNoble && g !== 'gold' && (
+      count <= 0 ||
+      (isSelPair && picked === 0) ||
+      (sel.length >= 3 && picked === 0) ||
+      (sel.length === 1 && sel[0] === g && count < 4)
+    );
     return {
       key: g,
       slot: i,
@@ -1529,6 +1583,7 @@ function buildViewModel(state, ui, layout, ctx) {
       pickedMany: picked > 1,
       showMinus: picked > 0 && isMyTurn && !needDiscard && !state.pendingNoble,
       isGold: g === 'gold',
+      illegal: illegal,
       disabled: g === 'gold' || count <= 0 || !isMyTurn || needDiscard
     };
   });
@@ -1752,9 +1807,12 @@ function buildViewModel(state, ui, layout, ctx) {
     stageScale: layout.scale,
     stageRotate: layout.rotate,
     topRightTop: layout.topRight || 10,
-    topRightCollapsed: !!ui.topRightCollapsed,
-    topRightToggleLabel: ui.topRightCollapsed ? '☰' : '×',
-    chatPanelTop: (layout.topRight || 10) + 44,
+    menuOpen: !!ui.menuOpen,
+    menuX: menuPos.x,
+    menuY: menuPos.y,
+    menuDirClass: menuDirClass,
+    menuToggleLabel: ui.menuOpen ? '收起' : '菜单',
+    chatPanelTop: safeChatTop,
     chat: (function () {
       const vm = C.chatVM(ui.chatMessages, seat, Date.now(), ui.chatPanelOpen, ui.chatTab, {
         pendingEmoji: ui.chatPendingEmoji || null,
@@ -1771,6 +1829,7 @@ function buildViewModel(state, ui, layout, ctx) {
       return vm;
     })(),
     screen: 'game',
+    toast: ui.toast || '',
     themeId: theme.id,
     themeName: theme.name,
     themeFallback: theme.fallback,
@@ -1793,9 +1852,8 @@ function buildViewModel(state, ui, layout, ctx) {
     goldCount: state.bank.gold,
     goldStyle: gemStyle('gold'),
     rivals: rivals,
-    // 对手卡定宽 200、间距 8：条宽由对手数算出，2 人局单卡不被拉满，
-    // 3/4 人局 3 张刚好收在中央提示条（x=626）之前
-    rivalStripWidth: rivals.length * 200 + Math.max(0, rivals.length - 1) * 8,
+    // 对手卡定宽 188、间距 7：3/4 人局 3 张刚好收在 594px，为中央回合条留出充裕间隙
+    rivalStripWidth: rivals.length * 188 + Math.max(0, rivals.length - 1) * 7,
     seats: seats,
     playerCount: state.players.length,
     roomCode: room ? room.code : '',
@@ -1819,11 +1877,16 @@ function buildViewModel(state, ui, layout, ctx) {
     me: {
       name: displayName(me),
       nameText: displayName(me, me.name),
+      avatarUrl: (me.uid && avatars && avatars[me.uid]) || (profile && profile.avatarUrl) || '',
+      avatarHue: avatarHue((profile && profile.avatar) || me.avatar || 'a0'),
+      initial: String(displayName(me, (profile && profile.nickname) || me.name || '珠')).slice(0, 1),
       points: me.points,
       pointsText: String(me.points),
       // 声望达到终局线后不截断：显示真实值，只换成金色高亮
       pointsReached: me.points >= FINAL_POINTS,
       pointsDen: '/' + FINAL_POINTS,
+      cardCount: me.cards.length,
+      nobleCount: me.nobles.length,
       totalTokens: E.tokenTotal(me),
       tokenText: E.tokenTotal(me) + '/10',
       reservedCount: me.reserved.length,
@@ -1833,11 +1896,23 @@ function buildViewModel(state, ui, layout, ctx) {
       // 红利行固定 5 色，与筹码行逐列对齐
       discountCells: discountCellsVM(state, seat),
       // 工作台两行资源：同色同序（白蓝绿红黑 + 黄金末位），零值可读。
-      // 退还阶段给每色下发「已选枚数」，同色多枚才看得见、也才有撤回入口。
+      // 退还阶段下发「已选枚数」；拿取/购买阶段下发逐列 +n / −n 实时预览。
       res: (function () {
         const r = myResourceVM(state, seat);
         const plan = ui.discardPlan || [];
-        r.tokens.forEach(function (t) { t.pickedCount = countIn(plan, t.key); });
+        const gainMap = {};
+        (pick.gain || []).forEach(function (g) { if (g.show) gainMap[g.key] = g.gainText; });
+        const payMap = {};
+        if (pick.mode === 'buy' && pick.items) {
+          pick.items.forEach(function (it) { payMap[it.key] = it.sign; });
+        }
+        r.tokens.forEach(function (t) {
+          t.pickedCount = countIn(plan, t.key);
+          t.gainText = isMyTurn && !needDiscard && gainMap[t.key] ? gainMap[t.key] : '';
+          t.gainShow = !!t.gainText;
+          t.payText = isMyTurn && !needDiscard && payMap[t.key] ? payMap[t.key] : '';
+          t.payShow = !!t.payText;
+        });
         return r;
       })()
     },
@@ -1872,6 +1947,33 @@ function buildViewModel(state, ui, layout, ctx) {
     // 「跳过」是规则兜底，只在无合法动作时出现
     canPass: canPass,
     detail: detailVM(state, ui, seat),
+    nobleDetail: (function () {
+      if (!ui.nobleDetailId) return null;
+      const noble = (state.nobles || []).filter(function (n) { return n.id === ui.nobleDetailId; })[0];
+      if (!noble) return null;
+      const slot = nobleSlot(noble);
+      const disc = E.getDiscounts(state, seat);
+      const reqs = nobleReqs(noble).map(function (r) {
+        const have = disc[r.key] || 0;
+        return Object.assign({}, r, {
+          label: META[r.key].label,
+          have: have,
+          met: have >= r.num,
+          missing: Math.max(0, r.num - have)
+        });
+      });
+      const ready = reqs.every(function (r) { return r.met; });
+      return {
+        id: noble.id,
+        title: T.nobleTitle(state.themeId, noble),
+        points: noble.points,
+        photoClass: slot.photoClass,
+        artClass: slot.artClass,
+        reqs: reqs,
+        ready: ready,
+        summary: ready ? '你的永久红利已满足到访条件，回合末将自动到访' : '集齐上述永久红利（发展卡产出）后，回合末自动到访'
+      };
+    })(),
     showRules: ui.showRules,
     showReserved: ui.showReserved,
     showLeaderboard: !!ui.showLeaderboard,
@@ -1883,6 +1985,8 @@ function buildViewModel(state, ui, layout, ctx) {
     resultBoard: resultBoard,
     endNotice: endNotice,
     showcaseList: ui.showcase ? [ui.showcase] : [],
+    floatScoreDeltas: ui.floatScoreDeltas || [],
+    floatTokenDeltas: ui.floatTokenDeltas || [],
     // 回合切换的全屏提醒：进入 / 离开自己的回合各一次
     turnFlash: ui.turnFlash || null,
     turnClock: clockVM(state, ui),
@@ -1915,6 +2019,7 @@ function freshUI(config) {
     discardPlan: [],
     toast: '',
     detail: null,
+    nobleDetailId: '',
     showRules: false,
     showReserved: false,
     // 好友体系：列表数据 + 弹层开关 + 加载/错误态
@@ -1978,9 +2083,12 @@ function freshUI(config) {
     showLeaderboard: false,
     leaderboard: null,
     leaderboardLoading: false,
-    // 右上角工具条收起态：真机胶囊避让会把它下推到贵族 / 牌列上方，
-    // 收起后只留 40px 手柄，把牌桌让出来。默认展开。
-    topRightCollapsed: false
+    // 牌桌悬浮菜单：默认停靠右下角安全区（避开微信右上角胶囊），支持拖拽与中文标签展开
+    menuOpen: false,
+    menuX: c.menuX !== undefined ? c.menuX : MENU_DEFAULT_X,
+    menuY: c.menuY !== undefined ? c.menuY : MENU_DEFAULT_Y,
+    floatScoreDeltas: [],
+    floatTokenDeltas: []
   };
 }
 
@@ -2229,6 +2337,10 @@ Page({
 
   onUnload() {
     this._unloaded = true;
+    if (this._toastTimer && typeof clearTimeout === 'function') {
+      clearTimeout(this._toastTimer);
+      this._toastTimer = null;
+    }
     this.clearTimer();
     this.stopClock();
     this.stopCloudPolling();
@@ -2257,6 +2369,10 @@ Page({
     if (this._flashTimer) {
       clearTimeout(this._flashTimer);
       this._flashTimer = null;
+    }
+    if (this._floatDeltaTimer) {
+      clearTimeout(this._floatDeltaTimer);
+      this._floatDeltaTimer = null;
     }
   },
 
@@ -2429,7 +2545,20 @@ Page({
     this.maybeRecordResult();
     // 换手检测要在渲染前做：全屏提醒与倒计时都由它重置
     this.syncTurnWatch();
-    if (toast) this.ui.toast = toast;
+    if (toast) {
+      this.ui.toast = toast;
+      if (this._toastTimer && typeof clearTimeout === 'function') clearTimeout(this._toastTimer);
+      if (typeof setTimeout === 'function') {
+        const that = this;
+        const msg = toast;
+        this._toastTimer = setTimeout(function () {
+          that._toastTimer = null;
+          if (!that.ui || that._unloaded || that.ui.toast !== msg) return;
+          that.ui.toast = '';
+          that.setData({ toast: '' });
+        }, 1400);
+      }
+    }
     this.setData(buildViewModel(this.state, this.ui, this._layout, {
       room: this.room, profile: this.profile, mySeat: this.mySeat,
       avatars: this._avatars || {}
@@ -2485,6 +2614,7 @@ Page({
 
   onToggleChatPanel() {
     if (this.ui.screen !== 'game') return;
+    if (Date.now() < (this._menuSuppressTapUntil || 0)) return;
     this.ui.chatPanelOpen = !this.ui.chatPanelOpen;
     // 关面板时清掉未投出的表情，下次打开回到「选表情」而不是半截的「选目标」
     if (!this.ui.chatPanelOpen) this.ui.chatPendingEmoji = null;
@@ -2492,19 +2622,90 @@ Page({
   },
 
   /**
-   * 收起 / 展开右上角工具条。
-   * 真机上它会因胶囊避让被下推（top 10 → 66/89），正好压住右侧贵族与牌列，
-   * 而贵族卡是必须常看的信息。收起后只剩一个手柄，不再遮挡。
-   * 收起时顺带关闭聊天面板：面板靠 top-right 定位，留着会悬在半空。
+   * 牌桌悬浮菜单：支持拖拽与清晰中文项展开。
+   * 避开微信右上角「…」与关闭胶囊，停靠在工作台外侧安全区并可自由拖放。
    */
-  onToggleTopRight() {
+  onToggleMenu() {
     if (this.ui.screen !== 'game') return;
-    this.ui.topRightCollapsed = !this.ui.topRightCollapsed;
-    if (this.ui.topRightCollapsed) {
-      this.ui.chatPanelOpen = false;
-      this.ui.chatPendingEmoji = null;
-    }
+    if (Date.now() < (this._menuSuppressTapUntil || 0)) return;
+    this.ui.menuOpen = !this.ui.menuOpen;
     this.refresh('');
+  },
+
+  onCloseMenu() {
+    if (!this.ui || !this.ui.menuOpen) return;
+    this.ui.menuOpen = false;
+    this.refresh('');
+  },
+
+  onMenuTouchStart(event) {
+    if (!this.ui || this.ui.screen !== 'game') return;
+    const t = (event && event.touches && event.touches[0]) || (event && event.changedTouches && event.changedTouches[0]) || event;
+    if (!t || typeof t.clientX !== 'number' || typeof t.clientY !== 'number') return;
+    const pos = clampMenuPos(this.ui.menuX, this.ui.menuY);
+    this._menuDrag = {
+      startClientX: t.clientX,
+      startClientY: t.clientY,
+      startX: pos.x,
+      startY: pos.y,
+      moved: false,
+      rotated90: !!((this._layout && this._layout.rotate === 90) || (event && event._rotated90))
+    };
+  },
+
+  onMenuTouchMove(event) {
+    const d = this._menuDrag;
+    if (!d || !this.ui || this.ui.screen !== 'game') return;
+    const t = (event && event.touches && event.touches[0]) || (event && event.changedTouches && event.changedTouches[0]) || event;
+    if (!t || typeof t.clientX !== 'number' || typeof t.clientY !== 'number') return;
+    const dx = t.clientX - d.startClientX;
+    const dy = t.clientY - d.startClientY;
+    if (!d.moved && (dx * dx + dy * dy) < 36) return;
+    d.moved = true;
+    this._menuSuppressTapUntil = Date.now() + 260;
+    const scale = (this._layout && this._layout.scale) || 1;
+    const dsx = (d.rotated90 ? dy : dx) / scale;
+    const dsy = (d.rotated90 ? -dx : dy) / scale;
+    const next = clampMenuPos(d.startX + dsx, d.startY + dsy);
+    if (next.x === this.ui.menuX && next.y === this.ui.menuY) return;
+    this.ui.menuX = next.x;
+    this.ui.menuY = next.y;
+    this.setData({
+      menuX: next.x,
+      menuY: next.y,
+      menuDirClass: menuDirClassOf(next.x, next.y)
+    });
+  },
+
+  onMenuTouchEnd() {
+    if (this._menuDrag && this._menuDrag.moved) {
+      this._menuSuppressTapUntil = Date.now() + 260;
+    }
+    this._menuDrag = null;
+  },
+
+  onMenuOpenLobby() {
+    if (Date.now() < (this._menuSuppressTapUntil || 0)) return;
+    this.ui.menuOpen = false;
+    this.onOpenLobby();
+  },
+
+  onMenuToggleChat() {
+    if (Date.now() < (this._menuSuppressTapUntil || 0)) return;
+    this.ui.menuOpen = false;
+    this.onToggleChatPanel();
+  },
+
+  onMenuRestart() {
+    if (Date.now() < (this._menuSuppressTapUntil || 0)) return;
+    this.ui.menuOpen = false;
+    this.onRestart();
+  },
+
+  onMenuQuitGame() {
+    if (Date.now() < (this._menuSuppressTapUntil || 0)) return;
+    this.ui.menuOpen = false;
+    this.onQuitGame();
   },
 
   onCloseChatPanel() {
@@ -2856,13 +3057,14 @@ Page({
       tone: mine ? 'mine' : (p.isAI ? 'bot' : 'other')
     };
     const that = this;
+    if (mine) haptic('medium');
     if (this._flashTimer) clearTimeout(this._flashTimer);
     this._flashTimer = setTimeout(function () {
       that._flashTimer = null;
       if (!that.ui) return;
       that.ui.turnFlash = null;
       that.refresh('');
-    }, 1700);
+    }, 1100);
   },
 
   /** 限时倒计时：每台设备按「自己看到换手的那一刻」起算，不依赖系统时钟对齐 */
@@ -3692,13 +3894,40 @@ Page({
       return false;
     }
     const actorSeat = this.state ? this.state.current : 0;
+    const myPlayer = this.state && this.state.players[this.mySeat || 0];
+    const prevPoints = myPlayer ? myPlayer.points : 0;
+    const prevTokens = myPlayer ? E.tokenTotal(myPlayer) : 0;
     const card = this.actionCard(action, actorSeat);
     const nextSeq = (this._showcaseSeq = (this._showcaseSeq || 0) + 1);
     const preShowcase = buildActionShowcase(this.state, action, actorSeat, this.mySeat, nextSeq, card);
     const result = E.performAction(this.state, action);
     if (!result.ok) {
+      haptic('medium');
       this.refresh(result.error);
       return false;
+    }
+    haptic('light');
+    if (myPlayer && actorSeat === (this.mySeat || 0)) {
+      const dPts = myPlayer.points - prevPoints;
+      const dTok = E.tokenTotal(myPlayer) - prevTokens;
+      const seqId = nextSeq;
+      this.ui.floatScoreDeltas = dPts !== 0
+        ? [{ id: 'fs-' + seqId, text: (dPts > 0 ? '+' : '') + dPts, positive: dPts > 0 }]
+        : [];
+      this.ui.floatTokenDeltas = dTok !== 0
+        ? [{ id: 'ft-' + seqId, text: (dTok > 0 ? '+' : '') + dTok, positive: dTok > 0 }]
+        : [];
+      if ((dPts !== 0 || dTok !== 0) && typeof setTimeout === 'function') {
+        if (this._floatDeltaTimer) clearTimeout(this._floatDeltaTimer);
+        const that = this;
+        this._floatDeltaTimer = setTimeout(function () {
+          that._floatDeltaTimer = null;
+          if (!that.ui || that._unloaded) return;
+          that.ui.floatScoreDeltas = [];
+          that.ui.floatTokenDeltas = [];
+          that.setData({ floatScoreDeltas: [], floatTokenDeltas: [] });
+        }, 650);
+      }
     }
     if (preShowcase) this.ui.showcase = preShowcase;
     this.stampAction(action, card, actorSeat);
@@ -3778,10 +4007,12 @@ Page({
     const key = event.currentTarget.dataset.key;
     if (s.current !== this.mySeat || s.gameOver || s.pendingDiscard > 0 || s.pendingNoble) return;
     if (key === 'gold') {
+      haptic('medium');
       this.refresh('黄金筹码只能通过「预留卡牌」获得');
       return;
     }
     if (s.bank[key] <= 0) {
+      haptic('medium');
       this.refresh('该宝石已无剩余');
       return;
     }
@@ -3795,25 +4026,30 @@ Page({
       this.removePileGem(key);
       return;
     } else if (isPair) {
+      haptic('medium');
       this.refresh('拿 2 枚同色筹码时，不能再拿其他颜色');
       return;
     } else if (sel.length === 0 || (sel.length === 1 && sel[0] === key)) {
       if (sel.length === 1 && s.bank[key] < 4) {
+        haptic('medium');
         this.refresh('该颜色剩余不足 4 枚，不能一次拿 2 枚');
         return;
       }
       sel.push(key);
     } else {
-      if (sel.length >= 3) {
+      if (sel.length >= 3 && inSel === 0) {
+        haptic('medium');
         this.refresh('一回合最多拿 3 枚筹码');
         return;
       }
       if (inSel > 0) {
-        this.refresh('该色已在选篮里 · 点右侧「-」可放回 1 枚');
+        // 多色选取时再次点击同一色直接放回 1 枚，不必瞄准右侧小「−」按钮
+        this.removePileGem(key);
         return;
       }
       sel.push(key);
     }
+    haptic('light');
     this.refresh('');
   },
 
@@ -3826,6 +4062,7 @@ Page({
     const at = sel.lastIndexOf(key);
     if (at < 0) return false;
     sel.splice(at, 1);
+    haptic('light');
     this.refresh('已放回 1 枚' + (META[key] ? META[key].label : key));
     return true;
   },
@@ -3968,13 +4205,16 @@ Page({
 
   onTapCard(event) {
     const s = this.state;
-    if (s.current !== this.mySeat || s.gameOver || s.pendingDiscard > 0) {
-      this.refresh('现在不是你的行动阶段');
+    if (!s || s.pendingDiscard > 0) {
+      haptic('medium');
+      this.refresh('请先退还超出上限的筹码');
       return;
     }
     const lv = Number(event.currentTarget.dataset.lv);
     const index = Number(event.currentTarget.dataset.index);
     if (!s.board[lv] || !s.board[lv][index]) return;
+    haptic('light');
+    this.ui.nobleDetailId = '';
     this.ui.detail = { kind: 'board', lv: lv, index: index, key: '' };
     this.ui.showReserved = false;
     this.refresh('');
@@ -4008,6 +4248,18 @@ Page({
 
   onCloseDetail() {
     this.ui.detail = null;
+    this.refresh('');
+  },
+
+  onTapNoble(event) {
+    const id = event && event.currentTarget && event.currentTarget.dataset.id;
+    if (!this.state || !id) return;
+    this.ui.nobleDetailId = id;
+    this.refresh('');
+  },
+
+  onCloseNobleDetail() {
+    this.ui.nobleDetailId = '';
     this.refresh('');
   },
 
@@ -4067,12 +4319,16 @@ Page({
     }
     const solo = this.ui.soloCount;
     const roomCount = this.ui.roomCount;
+    const menuX = this.ui.menuX;
+    const menuY = this.ui.menuY;
     this.ui = freshUI({
       screen: 'game',
       soloCount: solo,
       roomCount: roomCount,
       playerCount: this.ui.playerCount,
-      bots: { 1: true, 2: true, 3: true }
+      bots: { 1: true, 2: true, 3: true },
+      menuX: menuX,
+      menuY: menuY
     });
     this.startLocalGame();
   },
@@ -4434,9 +4690,11 @@ Page({
           avatar: R.PRESET_AVATARS[i % R.PRESET_AVATARS.length].key, avatarUrl: ''
         })
       : R.vacantSeat(seat, i);
-    this.refresh(next
+    this.ui.roomNotice = next
       ? '席位 ' + (i + 1) + ' 已交给机器人'
-      : '席位 ' + (i + 1) + ' 已释放给好友');
+      : '席位 ' + (i + 1) + ' 已释放给好友';
+    this.ui.toast = '';
+    this.refresh('');
     if (!R.hasCloud()) return;
     const that = this;
     R.cloudSetSeat(this._cloudCode, i, this.room.seats[i]).then(function (res) {
@@ -4551,13 +4809,15 @@ Page({
     this.ui.screen = 'game';
     this.ui.playerCount = seats.length;
     this.ui.detail = null;
+    this.ui.nobleDetailId = '';
     this.ui.selectedGems = [];
     this.ui.discardPlan = [];
     this.ui.showLobby = false;
     this.ui.roomNotice = '';
+    this.ui.toast = '';
     this._resultRecorded = false; this._gameStartedAt = Date.now();
     this.resetTurnUI();
-    this.refresh('牌局开始 · ' + seats.length + ' 人');
+    this.refresh('');
     this.saveSession();
     if (!R.hasCloud()) {
       this.maybeRunAi({ ended: true });
@@ -4639,11 +4899,14 @@ Page({
     p.autoPlay = !p.autoPlay;
     // 托管时清掉本机的待确认选择，避免恢复后看见一堆过期选篮
     if (p.autoPlay) {
-      this.ui.selectedGems = [];
-      this.ui.discardPlan = [];
-      this.ui.detail = null;
+    this.ui.selectedGems = [];
+    this.ui.discardPlan = [];
+    this.ui.toast = '';
+    this.ui.detail = null;
+    this.ui.nobleDetailId = '';
     }
-    this.refresh(p.autoPlay ? '已开启托管 · 由机器人代打本席位' : '已取消托管 · 交回给你操作');
+    this.ui.toast = '';
+    this.refresh('');
     this.pushCloudState();
     // 托管时若正好轮到自己，立刻让 AI 走一手，不让别人干等
     if (p.autoPlay && s.current === seat) {
@@ -4949,7 +5212,7 @@ Page({
     this.refresh('');
   },
   onTapMyPortrait() {
-    this.onTapPlayer({ currentTarget: { dataset: { index: this.mySeat } } });
+    this.onOpenProfile();
   },
 
   noop() {}

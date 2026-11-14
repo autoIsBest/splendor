@@ -27,7 +27,7 @@ function build() {
     rule('.stage', 'box-shadow:0 18px 55px rgba(8,25,27,.45),0 0 0 1px ' + p.edge + ';');
     // Group photo classes so the existing royal images lose specificity;
     // the atlas is embedded once and never travels through setData.
-    const photos = [prefix + ' .portrait', '.theme-thumb-' + id];
+    const photos = ['.theme-thumb-' + id];
     for (let i = 0; i < 90; i++) photos.push(prefix + ' .card-photo.photo-' + i);
     for (let i = 0; i < 10; i++) photos.push(prefix + ' .noble-photo.noble-photo-' + i);
     lines.push(photos.join(', ') + ' { background-image:url("data:image/jpeg;base64,' + image + '");background-size:300% 300%;background-position:0 0; }');
@@ -40,61 +40,147 @@ function build() {
       rule('.noble-photo.noble-photo-' + i, 'background-position:' + (slot % 3 * 50) + '% ' + (Math.floor(slot / 3) * 50) + '%;');
     }
     rule('.felt', 'background:radial-gradient(ellipse at 45% 40%,' + p.glow + ' 0%,' + p.table + ' 70%);');
-    rule('.felt-grain', 'background:repeating-linear-gradient(0deg,transparent 0 29px,rgba(180,225,218,.06) 29px 30px),repeating-linear-gradient(90deg,transparent 0 29px,rgba(180,225,218,.06) 29px 30px);');
+    if (id === 'pokemon') {
+      rule('.felt-grain', 'background:repeating-linear-gradient(45deg,transparent 0 18px,rgba(215,245,195,.05) 18px 19px),repeating-linear-gradient(-45deg,transparent 0 18px,rgba(12,50,35,.06) 18px 19px);');
+    } else {
+      rule('.felt-grain', 'background:repeating-linear-gradient(0deg,transparent 0 29px,rgba(180,225,218,.06) 29px 30px),repeating-linear-gradient(90deg,transparent 0 29px,rgba(180,225,218,.06) 29px 30px);');
+    }
     rule('.felt-vignette', 'background:radial-gradient(ellipse at center,transparent 60%,rgba(8,25,25,.34));box-shadow:inset 0 0 0 8px ' + p.deep + ';');
     rule('.wood-edge', 'background:' + p.deep + ';box-shadow:inset 0 0 0 1px ' + p.edge + ';');
     rule('.corner', 'opacity:.18;');
     rule('.table-emblem', 'opacity:.035;');
     rule('.tray-rim', 'background-image:none;background:linear-gradient(160deg,' + p.panel + ',' + p.deep + ');border:2px solid ' + p.edge + ';border-radius:' + p.radius + ';');
     rule('.tray-rim::after', 'display:none;');
-    rule('.seat-badge,.turn-banner,.top-right,.dialog,.room-top,.room-seat,.room-bottom,.id-stat,.vault-sq,.seat-sq,.count-chip,.timer-chip',
+    rule('.seat-badge,.turn-banner,.game-menu-dock,.game-menu-popover,.dialog,.room-top,.room-seat,.room-bottom,.id-stat,.count-chip,.timer-chip',
       'background:linear-gradient(160deg,' + p.panel + ',' + p.deep + ');border-color:' + p.edge + ';border-radius:' + p.radius + ';');
+    // 永久折扣格保持方形小圆角，避免与圆形筹码在轮廓上混淆
+    rule('.vault-sq,.seat-sq',
+      'background:linear-gradient(160deg,' + p.panel + ',' + p.deep + ');border-color:' + p.edge + ';');
     rule('.dialog,.room-seat', 'box-shadow:0 12px 32px rgba(5,25,26,.3),inset 0 0 0 3px rgba(130,180,163,.12);');
     rule('.room-seat.is-self', 'background:linear-gradient(160deg,' + p.panel + ',' + p.deep + ');');
     rule('.room-seat.is-empty', 'background:' + p.deep + ';');
     rule('.reserved-empty,.card-empty', 'border-color:' + p.edge + ';background:rgba(12,40,35,.08);');
     rule('.btn', 'color:' + p.ink + ';background:linear-gradient(180deg,' + p.panel + ',' + p.deep + ');border-color:' + p.edge + ';text-shadow:none;border-radius:' + p.radius + ';');
     rule('.btn-primary,.count-chip.is-active,.timer-chip.is-active', 'background:' + p.accent + ';color:' + p.accentInk + ';border-color:' + p.accent + ';text-shadow:none;box-shadow:0 3px 8px rgba(5,25,26,.22);');
-    rule('.round-btn', 'background:' + p.panel + ';color:' + p.ink + ';border-color:' + p.edge + ';text-shadow:none;');
-    rule('.turn-banner', 'left:640px;width:128px;');
-    rule('.turn-main', 'font-size:12px;');
-    rule('.turn-line', 'flex-direction:column;align-items:stretch;gap:2px;');
-    rule('.turn-clock', 'align-self:flex-start;');
+    rule('.round-btn,.menu-dock-btn,.game-menu-ic', 'background:' + p.panel + ';color:' + p.ink + ';border-color:' + p.edge + ';text-shadow:none;');
+    rule('.menu-dock-icon,.menu-dock-label,.game-menu-title,.game-menu-item-title', 'color:' + p.ink + ';text-shadow:none;');
+    rule('.game-menu-drag-tip,.menu-drag-grip text', 'color:' + p.muted + ';text-shadow:none;');
+    rule('.menu-dock-btn.is-active', 'background:' + p.accent + ';border-color:' + p.accent + ';');
+    rule('.menu-dock-btn.is-active .menu-dock-icon,.menu-dock-btn.is-active .menu-dock-label', 'color:' + p.accentInk + ';text-shadow:none;');
+    rule('.game-menu-item.is-danger', id === 'ai'
+      ? 'background:#fceaea;border-color:#d88882;'
+      : 'background:rgba(138,42,46,.28);border-color:rgba(224,120,102,.48);');
+    rule('.game-menu-item.is-danger .game-menu-ic', id === 'ai'
+      ? 'background:#f8d8d6;color:#a82e2a;border-color:#d88882;'
+      : 'background:radial-gradient(circle at 34% 26%,#8a3f46 0%,#4a1c26 65%,#24101a 100%);color:#ffd8c6;border-color:#e08a72;');
+    rule('.game-menu-item.is-danger .game-menu-item-title', id === 'ai'
+      ? 'color:#9f3029;'
+      : 'color:#ffd9ce;');
     rule('.portrait-frame,.room-avatar,.seat-avatar,.card,.noble', 'border-color:' + p.edge + ';');
-    rule('.deck-stack .deck-face', 'background-image:none;background:repeating-linear-gradient(45deg,transparent 0 7px,rgba(190,235,211,.1) 7px 8px),linear-gradient(160deg,' + p.panel + ',' + p.deep + ');');
+    // 三级牌库保持级差色阶，避免全刷成同色难以分辨等级
+    const deckTones = id === 'ai'
+      ? ['#d4ebe2,#b2d6c7', '#e9ebd0,#c8c9a1', '#d6e3f2,#adc3df']
+      : (id === 'pokemon'
+        ? ['#1b5b43,#0f3829', '#5a4e1c,#342c0d', '#1c4661,#0f2839']
+        : ['#103239,#081d22', '#2d2817,#161309', '#122944,#081626']);
+    rule('.deck-lv-0 .deck-face', 'background-image:none;background:repeating-linear-gradient(45deg,transparent 0 7px,rgba(190,235,211,.1) 7px 8px),linear-gradient(160deg,' + deckTones[0] + ');');
+    rule('.deck-lv-1 .deck-face', 'background-image:none;background:repeating-linear-gradient(45deg,transparent 0 7px,rgba(255,235,180,.1) 7px 8px),linear-gradient(160deg,' + deckTones[1] + ');');
+    rule('.deck-lv-2 .deck-face', 'background-image:none;background:repeating-linear-gradient(45deg,transparent 0 7px,rgba(180,220,255,.1) 7px 8px),linear-gradient(160deg,' + deckTones[2] + ');');
     rule('.deck-crest', 'border-color:' + p.edge + ';background:' + p.deep + ';');
-    rule('.card-photo,.noble-photo,.portrait', 'filter:none;');
+    rule('.card-photo,.noble-photo', 'filter:none;');
     rule('.dialog-title,.room-status-main,.room-seat-name,.room-code-big,.id-name,.id-stat-num,.turn-main,.seat-name,.vault-label,.vault-total-text,.vault-total-num,.pick-kind,.pick-title,.pick-total-num,.room-theme,.room-counts-label,.room-code-label,.room-seat-label,.result-title,.result-detail,.result-crown,.rail-title,.reserved-tag-ch,.reserved-tag-num',
       'color:' + p.ink + ';text-shadow:none;');
-    rule('.dialog-sub,.room-status-sub,.room-action-note,.room-tip,.pick-reason,.pick-total-label,.turn-sub,.turn-round,.rule-item,.rule-note,.detail-note,.detail-section,.cost-line-label,.cost-line-num,.player-mini,.profile-note,.room-seat-state,.invite-tip,.id-stat-label,.empty-tip',
+    rule('.dialog-sub,.room-status-sub,.room-action-note,.room-tip,.pick-reason,.pick-total-label,.turn-sub,.turn-round,.rule-item,.rule-note,.detail-note,.detail-section,.cost-line-label,.cost-line-num,.player-mini,.profile-note,.room-seat-state,.invite-tip,.id-stat-label,.empty-tip,.rail-hint',
       'color:' + p.muted + ';text-shadow:none;');
     rule('.overlay', 'background:rgba(4,17,24,.78);');
     rule('.turn-banner.is-mine,.seat-badge.is-current', 'border-color:' + (id === 'ai' ? '#27836a' : '#b4f1d2') + ';');
     if (id === 'ai') {
       rule('.detail-dialog .dialog-action-note', 'color:#41675e;');
       rule('.pick-delta.is-idle', 'color:#41675e;border-color:#92b7ae;background:#e0ebe6;');
-      rule('.pick-delta.is-plus', 'color:#236b59;');
-      rule('.pick-delta.is-minus', 'color:#9f3029;');
+      rule('.pick-delta.is-plus', 'color:#1d6b4e;background:#d7efe3;border-color:#78bba0;');
+      rule('.pick-delta.is-minus', 'color:#9f3029;background:#fae2e0;border-color:#d8908a;');
       rule('.seat-row-tag,.seat-no,.seat-first,.turn-sub-tag,.seat-res-tag,.seat-res-num,.pick-total-arrow', 'color:#41675e;text-shadow:none;');
+      rule('.seat-res', 'background:#e0ebe6;border-color:#84ab9f;');
       rule('.pick-total-num.is-next', 'color:#236b59;');
-      rule('.room-seat-state.is-ok', 'color:#236b59;border-color:#528c73;');
+      rule('.room-seat-state.is-ok', 'color:#236b59;border-color:#528c73;background:#d7efe3;');
+      rule('.room-seat-state.is-pending', 'color:#8a4f10;border-color:#c99c52;background:#f5ebd4;');
+      rule('.room-seat-action', 'color:#193e38;border-color:#7ca499;background:#e3efe9;box-shadow:0 2px 5px rgba(20,70,55,.15);');
+      rule('.room-seat-action.is-kick', 'color:#9f3029;border-color:#d8908a;background:#fae2e0;');
       rule('.vault-total-num.is-over', 'color:#b83e2f;');
       rule('.art-glaze', 'background:linear-gradient(0deg,rgba(7,28,24,.82),transparent 43%,transparent 85%,rgba(255,255,255,.08));');
+      rule('.noble', 'box-shadow:0 2.5px 0 #92b7ae,0 4px 0 #668e84,4px 8px 14px rgba(15,45,38,.25);');
+      rule('.noble-face::after', 'background:linear-gradient(90deg,rgba(25,62,56,.42) 0%,rgba(25,62,56,.16) 24%,transparent 34%),linear-gradient(0deg,rgba(12,34,29,.62) 0%,transparent 36%);');
       rule('.seat-sq text,.vault-sq text', 'color:#193e38;text-shadow:none;');
       rule('.seat-sq.is-zero text,.vault-sq.is-zero text', 'color:#56766c;text-shadow:none;');
       rule('.seat-sq.is-zero,.vault-sq.is-zero', 'opacity:.85;background:#e0ebe6;');
+      rule('.seat-coin.gem-white,.seat-coin.gem-blue,.seat-coin.gem-green,.seat-coin.gem-red,.seat-coin.gem-black,.seat-coin.gem-gold', 'background:#e8f2ee;');
+      rule('.seat-coin text', 'color:#193e38;text-shadow:none;');
+      rule('.seat-coin.is-zero text', 'color:#56766c;text-shadow:none;');
+      rule('.vault-coin', 'background:#e8f2ee;border-color:#84ab9f;box-shadow:inset 0 1px 0 #fff,0 2px 5px rgba(20,70,55,.16);');
+      rule('.vault-coin::after', 'background:radial-gradient(ellipse 62% 58% at 50% 50%,rgba(245,250,247,.72),rgba(245,250,247,.25) 72%,transparent 100%);');
+      rule('.vault-coin text', 'color:#102b26;text-shadow:0 1px 0 #fff,0 0 4px rgba(255,255,255,.95);');
+      rule('.vault-coin.is-zero', 'background:#e0ebe6;border-color:#b2cbc3;box-shadow:none;');
+      rule('.vault-coin.is-zero text', 'color:#5c7c73;text-shadow:none;');
+      rule('.seat-score', 'background:#e2efe9;border-color:#7ca499;box-shadow:0 1px 4px rgba(20,70,55,.15);');
+      rule('.seat-score-num', 'color:#193e38;');
+      rule('.seat-score.is-reached,.id-score.is-reached', 'background:#236b59;border-color:#194e40;');
+      rule('.seat-score.is-reached .seat-score-num,.id-score.is-reached .id-stat-num,.id-score.is-reached .id-stat-label', 'color:#ffffff;text-shadow:none;');
+      rule('.turn-clock', 'background:#e4f0eb;border-color:#84ab9f;');
+      rule('.turn-clock-num', 'color:#193e38;text-shadow:none;');
+      rule('.turn-clock.is-mine .turn-clock-num', 'color:#1a5f4d;');
+      rule('.turn-clock.is-urgent', 'border-color:#c95042;background:#fbe4e2;');
+      rule('.turn-clock.is-urgent .turn-clock-num', 'color:#a82e2a;');
+      rule('.turn-round', 'background:#ddeae5;');
+      rule('.auto-btn.is-on', 'background:#236b59;color:#ffffff;border-color:#194e40;box-shadow:0 2px 6px rgba(35,107,89,.3);');
       rule('.room-start,.dialog-title,.room-code-big,.turn-main', 'font-family:"Avenir Next","PingFang SC",sans-serif;');
-      rule('.room-seat-state,.cost-line,.room-input,.profile-input', 'background:#e2eeea;border-color:#a2bfb5;color:#193e38;');
-      rule('.pile-count,.deck-count,.deck-label,.gold-label', 'color:#173e36;text-shadow:0 1px 0 #fff;');
+      rule('.room-seat-state,.cost-line,.room-input,.profile-input,.friends-input,.friends-myid,.preset-nick', 'background:#e2eeea;border-color:#a2bfb5;color:#193e38;');
+      rule('.friends-found', 'background:#d7efe3;border-color:#68a88e;');
+      rule('.friends-found-name', 'color:#193e38;');
+      rule('.pile-count,.deck-count,.deck-label,.rail-hint', 'color:#173e36;text-shadow:0 1px 0 #fff;');
+      rule('.rail-hint', 'background:rgba(245,250,247,.78);');
       rule('.deck-count,.deck-crest', 'background:#e4f0eb;');
       rule('.rank-row,.records-row,.records-cell,.profile-current,.profile-identity,.friends-row', 'background:#e4efea;color:#193e38;border-color:#91b4a6;');
-      rule('.rank-name,.rank-pt,.rank-num,.rank-detail-line,.rank-detail-line.is-sub,.rank-seat,.rank-res-tag,.records-cell-value,.records-cell-label,.records-title,.records-sub,.profile-nickname,.profile-avatar-name,.profile-id-label,.profile-id-value,.profile-id-since,.profile-id-detail,.profile-rank,.profile-stats,.profile-login-hint,.friends-name,.friends-status,.friends-id,.friends-myid-label,.friends-myid-value,.friends-empty,.pd-card-caption',
+      rule('.rank-name,.rank-pt,.rank-num,.rank-detail-line,.rank-detail-line.is-sub,.rank-seat,.rank-res-tag,.records-cell-value,.records-cell-label,.records-title,.records-sub,.profile-nickname,.profile-avatar-name,.profile-id-label,.profile-id-value,.profile-id-since,.profile-id-detail,.profile-rank,.profile-stats,.profile-login-hint,.friends-name,.friends-status,.friends-id,.friends-myid-label,.friends-myid-value,.friends-empty,.pd-card-caption,.pd-tags text,.preset-avatar text',
         'color:#254f43;text-shadow:none;');
       rule('.score-line,.pd-noble', 'background:#e4efea;border-color:#91b4a6;');
       rule('.player-score,.pd-noble-title,.pd-noble-points', 'color:#254f43;text-shadow:none;');
       rule('.detail-summary.ok', 'color:#237149;');
-      rule('.detail-summary.no,.cost-line.is-missing .cost-line-num', 'color:#9f3029;');
+      rule('.detail-summary.no,.cost-line.is-missing .cost-line-num,.friends-notice', 'color:#9f3029;');
       rule('.round-btn', 'box-shadow:0 2px 5px rgba(20,70,55,.2),inset 0 1px 0 #fff;');
+      // 天梯榜 / 聊天 / 浮条在浅色主题下统一转为亮色表面与深墨文字
+      rule('.leaderboard-table', 'background:#eef6f3;border-color:#91b4a6;');
+      rule('.leaderboard-row', 'color:#193e38;border-bottom-color:rgba(120,160,148,.28);');
+      rule('.leaderboard-row.is-head', 'background:linear-gradient(180deg,#d8eae3,#c6dfd6);color:#153832;border-bottom-color:#84ab9f;');
+      rule('.leaderboard-row.is-me', 'background:rgba(46,138,108,.16);');
+      rule('.leaderboard-row.is-trial', 'background:rgba(160,185,178,.2);');
+      rule('.leaderboard-row.is-champion', 'background:linear-gradient(90deg,rgba(225,190,100,.28),rgba(225,190,100,.06) 62%,transparent);box-shadow:inset 2px 0 0 #b88322;');
+      rule('.leaderboard-source,.leaderboard-formula,.leaderboard-note,.leaderboard-scroll-hint text', 'color:#41675e;');
+      rule('.leaderboard-rule,.leaderboard-my', 'color:#1e5c4c;');
+      rule('.leaderboard-provisional', 'color:#9e4920;');
+      rule('.lb-section-head.is-official .lb-section-title,.lb-c-num.is-score,.lb-name.is-champion', 'color:#8a5608;');
+      rule('.lb-section-head.is-trial .lb-section-title,.lb-c-num.is-provisional', 'color:#4a6b62;');
+      rule('.lb-section-sub', 'color:#52756b;');
+      rule('.lb-me,.lb-provisional', 'color:#193e38;border-color:#7ca499;background:#ddeae5;');
+      rule('.leaderboard-login-hint', 'background:#e1efe9;border-color:#84ab9f;');
+      rule('.lb-hint-text', 'color:#193e38;');
+      rule('.chat-panel,.game-menu-popover', 'background:rgba(245,250,247,.97);border-color:#84ab9f;box-shadow:0 10px 26px rgba(15,50,42,.22);');
+      rule('.chat-tab,.chat-close,.chat-target-back,.game-menu-close,.game-menu-drag-tip', 'background:#e2eeea;border-color:#91b4a6;color:#193e38;');
+      rule('.chat-tab.is-active', 'background:#236b59;color:#ffffff;border-color:#236b59;');
+      rule('.chat-item.is-text,.chat-item.is-emoji,.chat-target-item,.chat-pending,.game-menu-item', 'background:#e8f2ee;border-color:#9cc0b5;color:#193e38;');
+      rule('.chat-item-label,.chat-panel-note,.chat-target-seat', 'color:#41675e;');
+      rule('.chat-pending-text,.chat-target-name', 'color:#193e38;');
+      rule('.chat-bubble', 'background:rgba(245,250,247,.96);border-color:#84ab9f;color:#193e38;box-shadow:0 4px 12px rgba(15,50,42,.18);');
+      rule('.chat-bubble.is-mine', 'background:rgba(215,239,227,.96);border-color:#528c73;');
+      rule('.chat-bubble-seat,.chat-bubble-target', 'color:#236b59;');
+      rule('.turn-flash-band', 'border-color:#27836a;background:linear-gradient(90deg,rgba(235,245,242,0) 0%,rgba(240,249,246,.95) 16%,rgba(240,249,246,.96) 84%,rgba(235,245,242,0) 100%);');
+      rule('.turn-flash-title', 'color:#193e38;text-shadow:none;');
+      rule('.turn-flash-seat,.turn-flash-sub', 'color:#2d6154;text-shadow:none;');
+      rule('.turn-flash.is-mine .turn-flash-band', 'border-color:#236b59;background:linear-gradient(90deg,rgba(220,242,235,0) 0%,rgba(225,245,238,.96) 16%,rgba(225,245,238,.96) 84%,rgba(220,242,235,0) 100%);');
+      rule('.turn-flash.is-mine .turn-flash-title,.turn-flash.is-mine .turn-flash-seat', 'color:#134d3e;text-shadow:none;');
+      rule('.showcase-banner,.noble-waiting,.end-notice,.invite-toast,.stage-toast', 'background:rgba(245,250,247,.96);border-color:#7ca499;box-shadow:0 8px 22px rgba(15,50,42,.22);');
+      rule('.showcase-title,.noble-waiting-text,.end-notice-text,.invite-toast-title,.stage-toast text', 'color:#193e38;text-shadow:none;');
+      rule('.showcase-badge,.showcase-sub,.end-notice-left,.invite-toast-sub', 'color:#2d6154;text-shadow:none;');
+      rule('.showcase-coin-label', 'background:#f5faf7;color:#193e38;border-color:#7ca499;');
     }
     if (id === 'cyberpunk') {
       rule('.dialog-title,.room-code-big,.turn-main,.room-status-main', 'font-family:"DIN Alternate","Avenir Next","PingFang SC",sans-serif;letter-spacing:1px;');

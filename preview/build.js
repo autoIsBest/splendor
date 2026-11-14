@@ -164,6 +164,13 @@ function emitTag(node, A, scope, depth, lines) {
       lines.push(pad + '$h.push(' + JSON.stringify(' ' + key + '="' + val + '"') + ');');
       return;
     }
+    if (/^(?:bind|catch)touch(?:start|move|end|cancel)$/.test(name)) {
+      const key = name.startsWith('catch')
+        ? ('data-catch' + name.slice(5))
+        : ('data-' + name.slice(4));
+      lines.push(pad + '$h.push(' + JSON.stringify(' ' + key + '="' + val + '"') + ');');
+      return;
+    }
     // 表单与原生头像选择：H5 预览里用等价的 DOM 事件委托模拟，
     // 小程序端仍使用原来的 bindinput / bindblur / bindchooseavatar。
     if (name === 'bindinput' || name === 'bindblur' || name === 'bindchange') {
@@ -221,15 +228,26 @@ function emitChildren(children, scope, depth, lines) {
     if (A['wx:if']) {
       lines.push(pad + 'if (EV(' + exprId(unwrap(A['wx:if'])) + ', ' + scope + ')) {');
       emitNode(c, scope, depth + 1, lines);
-      const next = children[i + 1];
-      if (next && next.type === 'node' && attrsOf(next)['wx:else'] !== undefined) {
-        lines.push(pad + '} else {');
-        emitNode(next, scope, depth + 1, lines);
-        i += 1;
+      while (i + 1 < children.length) {
+        const next = children[i + 1];
+        if (!next || next.type !== 'node') break;
+        const NA = attrsOf(next);
+        if (NA['wx:elif']) {
+          lines.push(pad + '} else if (EV(' + exprId(unwrap(NA['wx:elif'])) + ', ' + scope + ')) {');
+          emitNode(next, scope, depth + 1, lines);
+          i += 1;
+        } else if (NA['wx:else'] !== undefined) {
+          lines.push(pad + '} else {');
+          emitNode(next, scope, depth + 1, lines);
+          i += 1;
+          break;
+        } else {
+          break;
+        }
       }
       lines.push(pad + '}');
-    } else if (A['wx:else'] !== undefined) {
-      // 已由前一个 wx:if 消费
+    } else if (A['wx:elif'] || A['wx:else'] !== undefined) {
+      // 已由前一个 wx:if 链消费
     } else {
       emitNode(c, scope, depth, lines);
     }
@@ -355,7 +373,49 @@ const boot = `
     catch (err) { console.error('[splendor] render failed:', err); }
   }
   page.setData = function (patch) {
-    Object.keys(patch).forEach(function (k) { this.data[k] = patch[k]; }, this);
+    var keys = Object.keys(patch || {});
+    keys.forEach(function (k) { this.data[k] = patch[k]; }, this);
+    if (keys.length === 1 && keys[0] === 'toast' && !patch.toast) {
+      var toastEl = host.querySelector ? host.querySelector('.stage-toast') : null;
+      if (toastEl && toastEl.parentNode) toastEl.parentNode.removeChild(toastEl);
+      return;
+    }
+    if (keys.length > 0 && keys.every(function (k) {
+      return k === 'floatScoreDeltas' || k === 'floatTokenDeltas';
+    }) && (!patch.floatScoreDeltas || !patch.floatScoreDeltas.length) &&
+         (!patch.floatTokenDeltas || !patch.floatTokenDeltas.length)) {
+      var floatEls = host.querySelectorAll ? host.querySelectorAll('.float-delta') : [];
+      for (var fi = 0; fi < floatEls.length; fi += 1) {
+        if (floatEls[fi].parentNode) floatEls[fi].parentNode.removeChild(floatEls[fi]);
+      }
+      return;
+    }
+    if (keys.length === 1 && keys[0] === 'turnClock' && patch.turnClock && page.data.screen === 'game') {
+      var tc = patch.turnClock;
+      var clockEl = host.querySelector('.turn-clock');
+      var numEl = host.querySelector('.turn-clock-num');
+      var fillEl = host.querySelector('.turn-clock-fill');
+      if (tc.on && clockEl && numEl && fillEl) {
+        clockEl.className = 'turn-clock' + (tc.urgent ? ' is-urgent' : '') + (page.data.isMyTurn ? ' is-mine' : '');
+        numEl.textContent = tc.text;
+        fillEl.className = 'turn-clock-fill' + (tc.urgent ? ' is-urgent' : '');
+        fillEl.style.width = tc.pct + '%';
+        return;
+      }
+    }
+    if (keys.length > 0 && keys.every(function (k) {
+      return k === 'menuX' || k === 'menuY' || k === 'menuDirClass';
+    }) && page.data.screen === 'game') {
+      var dockEl = host.querySelector ? host.querySelector('.game-menu-dock') : null;
+      if (dockEl) {
+        if (patch.menuX !== undefined) dockEl.style.left = patch.menuX + 'px';
+        if (patch.menuY !== undefined) dockEl.style.top = patch.menuY + 'px';
+        if (patch.menuDirClass !== undefined) {
+          dockEl.className = 'game-menu-dock ' + patch.menuDirClass + (page.data.menuOpen ? ' is-open' : '');
+        }
+        return;
+      }
+    }
     draw();
   };
 
@@ -373,7 +433,8 @@ const boot = `
         var ds = {};
         for (var i = 0; i < el.attributes.length; i += 1) {
           var a = el.attributes[i];
-          if (a.name.indexOf('data-') === 0 && a.name !== 'data-tap' && a.name !== 'data-catchtap') {
+          if (a.name.indexOf('data-') === 0 &&
+              !/^data-(?:tap|catchtap|input|blur|change|avatar|(?:catch)?touch(?:start|move|end|cancel))$/.test(a.name)) {
             var key = a.name.slice(5).replace(/-([a-z])/g, function (_, c) { return c.toUpperCase(); });
             ds[key] = a.value;
           }
@@ -384,6 +445,76 @@ const boot = `
       el = el.parentNode;
     }
   });
+
+  // 触摸 / 鼠标拖拽委托：模拟 bindtouchstart / catchtouchmove / bindtouchend，支持悬浮菜单拖拽
+  function findTouchHost(startEl, attr, catchAttr) {
+    var el = startEl;
+    while (el && el !== host) {
+      if (el.getAttribute && (el.getAttribute(attr) || el.getAttribute(catchAttr))) return el;
+      el = el.parentNode;
+    }
+    return null;
+  }
+  function dispatchTouch(el, attr, catchAttr, type, pt, e) {
+    if (!el || !el.getAttribute) return;
+    var fn = el.getAttribute(catchAttr) || el.getAttribute(attr);
+    var isCatch = !!el.getAttribute(catchAttr);
+    if (fn && typeof page[fn] === 'function') {
+      if (isCatch && e && e.preventDefault) e.preventDefault();
+      page[fn]({
+        type: type,
+        touches: [{ clientX: pt.clientX, clientY: pt.clientY }],
+        changedTouches: [{ clientX: pt.clientX, clientY: pt.clientY }],
+        _rotated90: window.innerWidth < window.innerHeight,
+        currentTarget: { dataset: {} },
+        target: { dataset: {} }
+      });
+    }
+  }
+  var dragAnchor = null;
+  host.addEventListener('touchstart', function (e) {
+    var pt = e.touches && e.touches[0];
+    if (!pt) return;
+    var el = findTouchHost(e.target, 'data-touchstart', 'data-catchtouchstart');
+    if (!el) return;
+    dragAnchor = el;
+    dispatchTouch(el, 'data-touchstart', 'data-catchtouchstart', 'touchstart', pt, e);
+  }, { passive: true });
+  host.addEventListener('touchmove', function (e) {
+    var pt = e.touches && e.touches[0];
+    if (!pt || !dragAnchor) return;
+    dispatchTouch(dragAnchor, 'data-touchmove', 'data-catchtouchmove', 'touchmove', pt, e);
+  }, { passive: false });
+  host.addEventListener('touchend', function (e) {
+    var pt = (e.changedTouches && e.changedTouches[0]) || { clientX: 0, clientY: 0 };
+    if (!dragAnchor) return;
+    dispatchTouch(dragAnchor, 'data-touchend', 'data-catchtouchend', 'touchend', pt, e);
+    dragAnchor = null;
+  });
+  host.addEventListener('touchcancel', function (e) {
+    var pt = (e.changedTouches && e.changedTouches[0]) || { clientX: 0, clientY: 0 };
+    if (!dragAnchor) return;
+    dispatchTouch(dragAnchor, 'data-touchcancel', 'data-catchtouchcancel', 'touchcancel', pt, e);
+    dragAnchor = null;
+  });
+  host.addEventListener('mousedown', function (e) {
+    if (e.button !== 0) return;
+    var el = findTouchHost(e.target, 'data-touchstart', 'data-catchtouchstart');
+    if (!el) return;
+    dragAnchor = el;
+    dispatchTouch(el, 'data-touchstart', 'data-catchtouchstart', 'touchstart', e, e);
+  });
+  if (typeof document.addEventListener === 'function') {
+    document.addEventListener('mousemove', function (e) {
+      if (!dragAnchor) return;
+      dispatchTouch(dragAnchor, 'data-touchmove', 'data-catchtouchmove', 'touchmove', e, e);
+    });
+    document.addEventListener('mouseup', function (e) {
+      if (!dragAnchor) return;
+      dispatchTouch(dragAnchor, 'data-touchend', 'data-catchtouchend', 'touchend', e, e);
+      dragAnchor = null;
+    });
+  }
 
   // 表单事件委托：模拟 bindinput / bindchange（小程序端仍用原生绑定）
   function formEvent(type, attr) {

@@ -367,6 +367,35 @@ console.log('交互链路：规则 / 卡牌详情 / 预留卡 弹层渲染 OK');
   console.log('好友弹层：账号 ID / 空态 / 在线态 / 邀请提醒 OK');
 }
 
+// 3.055 悬浮对局菜单：停靠在安全区、带明确中文标签、展开后支持拖拽与全部菜单项
+{
+  assert(page.ui.screen === 'game', '悬浮菜单用例应在牌桌屏执行');
+  let mh = a.host.innerHTML;
+  assert(mh.indexOf('class="game-menu-dock') > 0, '应渲染可拖拽悬浮菜单停靠条');
+  assert(mh.indexOf('class="top-right') < 0, '旧右上角胶囊冲突工具条不应再存在');
+  assert(mh.indexOf('data-catchtouchmove="onMenuTouchMove"') > 0, '停靠条应编译拖拽事件绑定');
+  assert(mh.indexOf('>菜单<') > 0 && mh.indexOf('>聊天<') > 0, '停靠条按钮必须有明确中文标签');
+
+  click('onToggleMenu');
+  mh = a.host.innerHTML;
+  assert(mh.indexOf('class="game-menu-popover"') > 0, '点击菜单应展开悬浮菜单窗');
+  ['对局菜单', '按住拖动', '快捷聊天', '重新开始', '投降'].forEach(function (label) {
+    assert(mh.indexOf(label) > 0, '展开菜单缺少明确项：' + label);
+  });
+  assert(mh.indexOf('game-menu-item-sub') < 0, '菜单项下方不应有小字说明');
+  assert(mh.indexOf('onMenuOpenProfile') < 0 && mh.indexOf('onMenuShowRules') < 0,
+    '个人资料与游戏规则不应占在对局菜单中');
+  click('onCloseMenu');
+  assert(a.host.innerHTML.indexOf('class="game-menu-popover"') < 0, '收起后悬浮窗应关闭');
+
+  // 点击自己头像直接打开个人资料，点击对手头像打开对手详情
+  click('onTapMyPortrait');
+  assert(page.data.showProfile === true, '点击自己头像应直接触发个人资料弹窗');
+  click('onCloseProfile');
+  assert(page.data.showProfile === false, '个人资料弹窗应能正常关闭');
+  console.log('悬浮对局菜单：精简菜单项 / 无小字说明 / 头像触发资料 OK');
+}
+
 // 3.06 局内快捷聊天：面板 / 互斥 tab / 预设文案 / 气泡 / 大表情飞入
 {
   assert(page.ui.screen === 'game', '聊天用例应在牌桌屏执行');
@@ -635,20 +664,22 @@ assert(page.data.canConfirm === true, '凑满 3 色才可确认');
 click('onCancelSelection');
 console.log('交互链路：选篮门禁 / 「-」放回 / 3 色放行 OK');
 
-// 4.05 待确认摘要：勾选后必须能读到「本次拿取」与「确认后 n/10 → m/10」
+// 4.05 待确认摘要：勾选后以宝石色点 + 「确认后 n/10 → m/10」呈现，不重复文字明细
 click('onTapPile', { key: 'white' });
 click('onTapPile', { key: 'blue' });
 let summaryHtml = a.host.innerHTML;
 assert(summaryHtml.indexOf('pick-kind') > 0, '工作台应有待确认摘要区');
-assert(summaryHtml.indexOf('本次拿取') > 0, '选中后应显示「本次拿取」明细');
+assert(summaryHtml.indexOf('class="pick-dot ') > 0, '选中后应显示已选宝石色点');
+assert(summaryHtml.indexOf('本次拿取') < 0, '不应再输出冗余的「本次拿取」文字明细');
 assert(summaryHtml.indexOf('确认后') > 0, '摘要应给出确认后的总量');
 assert(summaryHtml.indexOf('pick-total-num is-next') > 0, '应并排显示变化后的数值');
 assert(summaryHtml.indexOf('pick-delta') > 0, '应有独立的 +n 增量标记');
 assert(summaryHtml.indexOf('确认拿取 2 枚') < 0, '未凑满时按钮文案不应谎报可提交');
 click('onCancelSelection');
 summaryHtml = a.host.innerHTML;
-assert(summaryHtml.indexOf('未选择筹码') > 0, '清除后摘要应回到空态');
-console.log('交互链路：待确认摘要 · 本次拿取 / 确认后总量 / 清除回空态 OK');
+assert(summaryHtml.indexOf('class="pick-dot ') < 0 && summaryHtml.indexOf('pick-delta is-idle') > 0,
+  '清除后摘要应回到空态');
+console.log('交互链路：待确认摘要 · 色点 / 确认后总量 / 清除回空态 OK');
 
 // 4) 模拟真实点击：选取筹码 -> 确认拿取
 const before = page.state.bank.white;
@@ -889,6 +920,24 @@ console.log('四主题入口 / 三套主题房间与牌桌 / 退房恢复 OK');
   assert(resultHtml.indexOf('{{') < 0, '结算表不能有未求值表达式');
   b.page.onUnload();
   console.log('渲染层 · 随机 1 号位号位随锚点一起换 / 结算表 seatLabel OK');
+}
+
+/* ---------- UI/UX 规范：防回弹、胶囊避让、非法态暗化、浮动增量 ---------- */
+{
+  const c = run(1280, 720);
+  assert(c.host.innerHTML.indexOf('data-catchtouchmove="noop"') > 0, '最外层 viewport 应绑定 catchtouchmove="noop" 防回弹');
+  c.page.mode = 'room';
+  c.page.openRoom();
+  c.page.setData({ topRightTop: 64 });
+  assert(c.host.innerHTML.indexOf('padding-top:64px;') > 0, '房间页顶部应随 topRightTop 动态下移避让胶囊');
+  c.page.onStartSolo();
+  c.page.onTapPile({ currentTarget: { dataset: { key: 'white' } } });
+  c.page.onTapPile({ currentTarget: { dataset: { key: 'white' } } });
+  assert(c.host.innerHTML.indexOf('is-illegal') > 0, '已选同色 2 枚时其他筹码堆应渲染 is-illegal 暗化');
+  c.page.onConfirmTake();
+  assert(c.host.innerHTML.indexOf('float-delta is-vault is-plus') > 0, '确认拿取后应渲染浮动增量飘字');
+  c.page.onUnload();
+  console.log('渲染层 · UI/UX 规范（防回弹 / 房间避让胶囊 / 非法暗化 / 浮动增量） OK');
 }
 
 console.log('\nALL PREVIEW TESTS PASSED');

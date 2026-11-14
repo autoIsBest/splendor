@@ -760,6 +760,22 @@ Object.keys(GEM_META).forEach(function (k) {
   lines.push('.coin-face.coin-' + k + ' { background-image: ' + bg(coinFaceSVG(k)) + '; }');
 });
 
+lines.push('');
+lines.push('/* --- 机器人 / 托管头像徽章图标 --- */');
+lines.push('.robot-logo-icon { background-image: ' + bg(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
+  '<line x1="16" y1="3" x2="16" y2="8" stroke="#9fe8f7" stroke-width="2.2" stroke-linecap="round"/>' +
+  '<circle cx="16" cy="3" r="2.2" fill="#ffd979"/>' +
+  '<rect x="6" y="8" width="20" height="16" rx="5" fill="#e6f6fa" stroke="#184a5c" stroke-width="1.8"/>' +
+  '<rect x="3" y="13" width="3" height="6" rx="1.5" fill="#9fe8f7"/>' +
+  '<rect x="26" y="13" width="3" height="6" rx="1.5" fill="#9fe8f7"/>' +
+  '<rect x="9" y="12" width="14" height="6.5" rx="3" fill="#0c2633"/>' +
+  '<circle cx="13" cy="15.2" r="1.7" fill="#7ce2f7"/>' +
+  '<circle cx="19" cy="15.2" r="1.7" fill="#7ce2f7"/>' +
+  '<path d="M12 21h8" stroke="#184a5c" stroke-width="1.8" stroke-linecap="round"/>' +
+  '</svg>'
+) + '; }');
+
 const photoCount = collectThumbs(lines);
 lines.push('');
 

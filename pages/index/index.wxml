@@ -1,7 +1,7 @@
 <!-- 璀璨宝石 · 横屏 2.5D 实体牌桌
      逻辑舞台 1080×560，按窗口等比缩放；所有数字、状态由 buildViewModel 实时驱动。
      绘制层级：桌布 → 接触投影 → 纸叠/筹码侧壁 → 卡面/筹码顶面 → 数字图标 → 选中轮廓 → 弹层。 -->
-<view class="viewport theme-{{themeId}}">
+<view class="viewport theme-{{themeId}}" catchtouchmove="noop">
   <view class="stage" style="transform:rotate({{stageRotate}}deg) scale({{stageScale}});">
 
     <!-- ========== 场景层：酒红绒布、柔和光斑、边缘暗化、实体木框 ========== -->
@@ -19,6 +19,7 @@
     <view class="corner corner-bl"></view>
     <view class="corner corner-br"></view>
     <view wx:if="{{themeFallback}}" class="theme-fallback"><text>当前客户端暂不支持房间主题，已使用皇家商会显示</text></view>
+    <view wx:if="{{toast}}" class="stage-toast"><text>{{toast}}</text></view>
 
     <!-- ========== 牌桌图层：仅在 screen === 'game' 时渲染 ========== -->
     <view wx:if="{{screen === 'game'}}" class="board-layer">
@@ -41,8 +42,10 @@
                     style="background:radial-gradient(circle at 32% 24%, rgba(255,240,210,.55), {{item.avatarHue}} 52%, rgba(20,10,16,.92) 100%);">
                 <text class="seat-avatar-initial">{{item.initial}}</text>
               </view>
-              <!-- 托管角标：压在头像右下，一眼看出这个席位现在由 AI 代打 -->
-              <view wx:if="{{item.autoPlay}}" class="auto-badge"><text>托管</text></view>
+              <!-- 机器人 / 托管动态徽章：本来就是机器人或玩家开启托管时都在头像框显示动态机器人图标 -->
+              <view wx:if="{{item.isBot || item.autoPlay}}" class="robot-badge {{item.autoPlay ? 'is-auto' : 'is-bot'}}">
+                <view class="robot-logo-icon"></view>
+              </view>
             </view>
             <text class="seat-no {{item.isCurrent ? 'is-current' : ''}}">{{item.seatNo}}</text>
             <text class="seat-name">{{item.name}}</text>
@@ -92,8 +95,8 @@
         <view class="turn-sub-row">
           <text class="turn-round">{{turnText}}</text>
           <text wx:if="{{netNotice}}" class="turn-sub is-net">{{netNotice}}</text>
-          <text wx:elif="{{lastMove && !lastMove.sys}}" class="turn-sub is-last"><text class="turn-sub-tag">上一手</text>{{lastMove.text}}</text>
-          <text wx:else class="turn-sub">{{logText}}</text>
+          <text wx:if="{{!netNotice && lastMove && !lastMove.sys}}" class="turn-sub is-last"><text class="turn-sub-tag">上一手</text>{{lastMove.text}}</text>
+          <text wx:if="{{!netNotice && (!lastMove || lastMove.sys)}}" class="turn-sub">{{logText}}</text>
         </view>
         <!-- 计时进度条贴在整条底边：不额外占横向空间，也不和标题抢行 -->
         <view wx:if="{{turnClock.on}}" class="turn-clock-track">
@@ -101,30 +104,8 @@
         </view>
       </view>
 
-      <!-- top 由胶囊避让计算（topRightOffset），真机横屏时下移到胶囊下方。
-           金数量不再放这里：桌面筹码区已经展示黄金存量，顶栏重复一遍既占位
-           又会把整条工具栏撑宽，遮住右侧贵族 / 牌列。
-           收起态只留一个圆形手柄，默认展开；点手柄收起后只占 40px，
-           不再压住牌桌内容。 -->
-      <view class="top-right {{topRightCollapsed ? 'is-collapsed' : ''}}" style="top:{{topRightTop}}px;">
-        <view class="round-btn top-right-toggle" bindtap="onToggleTopRight" hover-class="round-btn-hover">
-          <text>{{topRightToggleLabel}}</text>
-        </view>
-        <!-- 这里必须用 view：WXML 的 block 标签在 H5 侧会被编译成行内元素 span，
-             与外层 flex 混排会把整条工具条挤成竖排并撑高、压住右侧贵族。
-             （注释里不要写出真实标签名，静态校验器按正则扫标签，会被当成未闭合标签。） -->
-        <view wx:if="{{!topRightCollapsed}}" class="top-right-group">
-          <!-- 退出：人机局＝放弃本局，联机局＝投降并转机器人托管。
-               放在最左侧（远离胶囊），常驻可见，不再只在房间模式出现。 -->
-          <view class="round-btn quit-btn" bindtap="onQuitGame" hover-class="round-btn-hover"><text>⏻</text></view>
-          <view wx:if="{{roomMode}}" class="round-btn room-btn" bindtap="onOpenLobby"><text>⚑</text></view>
-          <view class="round-btn" bindtap="onOpenProfile"><text>☻</text></view>
-          <view class="round-btn" bindtap="onShowRules"><text>?</text></view>
-          <view class="round-btn" bindtap="onRestart"><text>↺</text></view>
-          <!-- 局内快捷聊天入口：面板从顶栏下方展开，不占牌桌常驻空间 -->
-          <view class="round-btn chat-trigger {{chat.open ? 'is-open' : ''}}" bindtap="onToggleChatPanel" hover-class="round-btn-hover"><text>💬</text></view>
-        </view>
-      </view>
+      <!-- 顶栏右侧留白：避让微信小程序右上角「…」与关闭胶囊按钮；
+           牌桌菜单已移至可拖拽悬浮菜单停靠条（默认右下角安全区）。 -->
     </view>
 
     <!-- ========== 换手全屏提醒：进入 / 离开自己的回合各一次 ==========
@@ -250,7 +231,7 @@
         <text class="rail-title">宝石筹码 · 点击选取</text>
         <view class="pile-list">
           <view wx:for="{{bankPiles}}" wx:key="key"
-                class="pile-item {{item.slotClass}} {{item.isGold ? 'is-gold' : ''}} {{item.selected ? 'is-selected' : ''}} {{item.disabled ? 'is-disabled' : ''}}"
+                class="pile-item {{item.slotClass}} {{item.isGold ? 'is-gold' : ''}} {{item.selected ? 'is-selected' : ''}} {{item.disabled ? 'is-disabled' : ''}} {{item.illegal ? 'is-illegal' : ''}}"
                 bindtap="onTapPile" data-key="{{item.key}}" hover-class="pile-hover">
             <view class="pile-stack">
               <view wx:for="{{item.stack}}" wx:for-item="req" wx:key="idx"
@@ -274,7 +255,8 @@
       <view class="noble-area {{noblesCompact ? 'is-compact' : ''}}">
         <text class="rail-title">贵族牌 · 各 3 声望</text>
         <view class="noble-row">
-          <view wx:for="{{nobles}}" wx:key="id" class="noble" style="{{item.style}}">
+          <view wx:for="{{nobles}}" wx:key="id" class="noble" style="{{item.style}}"
+                bindtap="onTapNoble" data-id="{{item.id}}" hover-class="noble-hover">
             <view class="noble-face"><view class="noble-photo {{item.photoClass}} {{item.artClass}}"></view></view>
             <text class="noble-points">{{item.points}}</text>
             <text class="noble-title">{{item.title}}</text>
@@ -295,24 +277,39 @@
     <view class="tray {{isMyTurn ? 'is-my-turn' : ''}}">
       <view class="tray-rim"></view>
 
-      <!-- ① 身份区：头像 + 号位 + 声望 + 预留（预留只在这里做主要展示） -->
+      <!-- ① 身份区：头像（真实微信头像或主题肖像）+ 号位 + 托管开关 + 声望 + 预留 + 发展卡 -->
       <view class="tray-left">
-        <view class="portrait-frame" bindtap="onTapMyPortrait" hover-class="portrait-hover">
-          <view class="portrait"></view>
+        <view class="portrait-frame {{meAutoPlay ? 'is-auto' : ''}}" bindtap="onTapMyPortrait" hover-class="portrait-hover">
+          <image wx:if="{{me.avatarUrl}}" class="portrait-img" src="{{me.avatarUrl}}" mode="aspectFill"></image>
+          <view wx:else class="portrait-preset"
+                style="background:radial-gradient(circle at 32% 24%, rgba(255,240,210,.55), {{me.avatarHue}} 52%, rgba(20,10,16,.92) 100%);">
+            <text class="portrait-initial">{{me.initial}}</text>
+          </view>
+          <view wx:if="{{meAutoPlay}}" class="robot-badge is-large is-auto">
+            <view class="robot-logo-icon"></view>
+          </view>
           <view class="portrait-seat"><text>{{meSeatLabel}}</text></view>
         </view>
         <view class="id-block">
-          <text class="id-name">{{me.nameText}}</text>
+          <view class="id-head">
+            <text class="id-name">{{me.nameText}}</text>
+            <!-- 托管：联机局专用。移出右下动作区，不再挤占主按钮宽度 -->
+            <view wx:if="{{canAutoPlay}}" class="btn auto-btn {{meAutoPlay ? 'is-on' : ''}}" bindtap="onToggleAutoPlay">
+              {{meAutoPlay ? '收回' : '托管'}}
+            </view>
+          </view>
           <view class="id-stats">
             <view class="id-stat id-score {{me.pointsReached ? 'is-reached' : ''}}">
               <text class="id-stat-num">{{me.pointsText}}</text>
               <text class="id-stat-label">声望</text>
+              <view wx:for="{{floatScoreDeltas}}" wx:key="id" class="float-delta {{item.positive ? 'is-plus' : 'is-minus'}}"><text>{{item.text}}</text></view>
             </view>
             <view class="id-stat id-reserved" bindtap="onShowReserved" hover-class="id-stat-hover">
               <text class="id-stat-num">{{me.reservedText}}</text>
               <text class="id-stat-label">预留</text>
             </view>
           </view>
+          <text class="id-cards-meta">发展卡 {{me.cardCount}} · 贵族 {{me.nobleCount}}</text>
         </view>
       </view>
 
@@ -320,6 +317,7 @@
       <view class="tray-vault">
         <view class="vault-head">
           <text class="vault-total-text">我的筹码 <text class="vault-total-num {{me.totalTokens > 10 ? 'is-over' : ''}}">{{me.tokenText}}</text></text>
+          <view wx:for="{{floatTokenDeltas}}" wx:key="id" class="float-delta is-vault {{item.positive ? 'is-plus' : 'is-minus'}}"><text>{{item.text}}</text></view>
         </view>
         <view class="vault-group">
           <text class="vault-label">永久折扣</text>
@@ -338,6 +336,8 @@
                   class="vault-coin gem-icon {{item.gemClass}} {{item.zero ? 'is-zero' : ''}} {{item.wide ? 'is-wide' : ''}} {{item.light ? 'is-light' : ''}} {{item.isGold ? 'is-gold' : ''}} {{needDiscard ? 'can-discard' : ''}} {{(needDiscard && item.pickedCount > 0) ? 'is-picked' : ''}}"
                   bindtap="onTapMyToken" data-key="{{item.key}}" hover-class="vault-hover">
               <text class="vault-coin-num">{{item.numText}}</text>
+              <text wx:if="{{item.gainShow}}" class="vault-col-delta is-plus">{{item.gainText}}</text>
+              <text wx:if="{{item.payShow}}" class="vault-col-delta is-minus">{{item.payText}}</text>
               <!-- 官方规则允许同色退多枚：角标显示已选枚数，「−」按钮逐枚撤回。
                    两者与「点筹码加一枚」分开，避免再点同色被误当成撤回。 -->
               <text wx:if="{{needDiscard && item.pickedCount > 0}}" class="vault-picked-badge">−{{item.pickedCount}}</text>
@@ -348,32 +348,31 @@
         </view>
       </view>
 
-      <!-- ③ 操作区：固定的待确认摘要 + 唯一主按钮 + 次级清除
-           摘要只用「本次…」+「确认后 n/10 → m/10」两行：逐色明细已并入第一行，
-           省下的高度全部给主按钮（命中外框统一 ≥46 舞台 px）。 -->
+      <!-- ③ 操作区：固定的待确认摘要 + 唯一主按钮 + 次级清除 -->
       <view class="tray-right {{isMyTurn ? '' : 'is-idle'}}">
         <view class="pick-head">
           <text class="pick-kind">{{pick.kind}}</text>
+          <view wx:if="{{pick.dots && pick.dots.length}}" class="pick-dots">
+            <view wx:for="{{pick.dots}}" wx:key="key" class="pick-dot gem-icon {{item.gemClass}}"></view>
+          </view>
           <text wx:if="{{pick.delta > 0}}" class="pick-delta is-plus">+{{pick.delta}}</text>
-          <text wx:elif="{{pick.delta < 0}}" class="pick-delta is-minus">{{pick.delta}}</text>
-          <text wx:elif="{{pick.mode === 'take'}}" class="pick-delta is-idle">0</text>
+          <text wx:if="{{pick.delta < 0}}" class="pick-delta is-minus">{{pick.delta}}</text>
+          <text wx:if="{{pick.delta === 0 && pick.mode === 'take'}}" class="pick-delta is-idle">0</text>
         </view>
-        <text class="pick-title">{{pick.title}}</text>
-        <view class="pick-total">
-          <text class="pick-total-label">确认后</text>
-          <text class="pick-total-num">{{pick.fromText}}/10</text>
-          <text class="pick-total-arrow">→</text>
-          <text class="pick-total-num is-next">{{pick.toText}}/10</text>
+        <view class="pick-summary-row">
+          <text wx:if="{{pick.title}}" class="pick-title">{{pick.title}}</text>
+          <view class="pick-total">
+            <text class="pick-total-label">确认后</text>
+            <text class="pick-total-num">{{pick.fromText}}/10</text>
+            <text class="pick-total-arrow">→</text>
+            <text class="pick-total-num is-next">{{pick.toText}}/10</text>
+          </view>
         </view>
         <view class="pick-actions">
-          <view class="btn btn-primary pick-main {{canConfirm ? '' : 'btn-off'}}" bindtap="onConfirmTake">{{isMyTurn ? pick.label : '等待其他玩家'}}</view>
+          <view class="btn btn-primary pick-main {{canConfirm ? '' : 'btn-off'}}" bindtap="onConfirmTake">{{isMyTurn ? (meAutoPlay ? '托管自动出牌中' : pick.label) : '等待其他玩家'}}</view>
           <view class="btn pick-clear {{(selectionCount > 0 || discardPlanCount > 0 || detail) ? '' : 'btn-off'}}"
                 bindtap="onCancelSelection">清除</view>
           <view wx:if="{{canPass}}" class="btn pick-pass" bindtap="onPass">跳过</view>
-          <!-- 托管：联机局专用。开启后不退出牌局，本席位由 AI 代打，可随时收回。 -->
-          <view wx:if="{{canAutoPlay}}" class="btn auto-btn {{meAutoPlay ? 'is-on' : ''}}" bindtap="onToggleAutoPlay">
-            {{meAutoPlay ? '收回' : '托管'}}
-          </view>
         </view>
         <text class="pick-reason">{{isMyTurn ? (pick.reason || pick.goldLine || pickHint) : pickHint}}</text>
       </view>
@@ -522,6 +521,50 @@
       <view class="chat-fly-emoji"><text>{{item.icon}}</text></view>
       <text class="chat-fly-label">{{item.label}}</text>
     </view>
+
+    <!-- ========== 可拖拽悬浮菜单：避开微信右上角胶囊，带明确文字标签 ========== -->
+    <view class="game-menu-dock {{menuDirClass}} {{menuOpen ? 'is-open' : ''}}"
+          style="left:{{menuX}}px;top:{{menuY}}px;"
+          bindtouchstart="onMenuTouchStart" catchtouchmove="onMenuTouchMove"
+          bindtouchend="onMenuTouchEnd" bindtouchcancel="onMenuTouchEnd">
+      <view class="menu-drag-grip"><text>⋮⋮</text></view>
+      <view class="menu-dock-btn {{menuOpen ? 'is-active' : ''}}" bindtap="onToggleMenu" hover-class="round-btn-hover">
+        <text class="menu-dock-icon">{{menuOpen ? '✕' : '☰'}}</text>
+        <text class="menu-dock-label">{{menuToggleLabel}}</text>
+      </view>
+      <view class="menu-dock-btn is-chat {{chat.open ? 'is-active' : ''}}" bindtap="onToggleChatPanel" hover-class="round-btn-hover">
+        <text class="menu-dock-icon">💬</text>
+        <text class="menu-dock-label">聊天</text>
+      </view>
+
+      <view wx:if="{{menuOpen}}" class="game-menu-popover" catchtap="noop">
+        <view class="game-menu-head">
+          <view class="game-menu-head-left">
+            <text class="game-menu-title">对局菜单</text>
+            <text class="game-menu-drag-tip">按住拖动</text>
+          </view>
+          <view class="game-menu-close" catchtap="onCloseMenu"><text>收起</text></view>
+        </view>
+        <view class="game-menu-list">
+          <view wx:if="{{roomMode}}" class="game-menu-item" catchtap="onMenuOpenLobby" hover-class="game-menu-item-hover">
+            <view class="game-menu-ic"><text>⚑</text></view>
+            <text class="game-menu-item-title">房间大厅</text>
+          </view>
+          <view class="game-menu-item" catchtap="onMenuToggleChat" hover-class="game-menu-item-hover">
+            <view class="game-menu-ic"><text>💬</text></view>
+            <text class="game-menu-item-title">快捷聊天</text>
+          </view>
+          <view class="game-menu-item" catchtap="onMenuRestart" hover-class="game-menu-item-hover">
+            <view class="game-menu-ic"><text>↺</text></view>
+            <text class="game-menu-item-title">重新开始</text>
+          </view>
+          <view class="game-menu-item is-danger" catchtap="onMenuQuitGame" hover-class="game-menu-item-hover">
+            <view class="game-menu-ic"><text>⏻</text></view>
+            <text class="game-menu-item-title">投降</text>
+          </view>
+        </view>
+      </view>
+    </view>
     </view>
     <!-- ========== /牌桌图层 ========== -->
 
@@ -535,7 +578,10 @@
           <view wx:if="{{home.avatarUrl}}" class="guild-avatar">
             <image class="guild-avatar-img" src="{{home.avatarUrl}}" mode="aspectFill"></image>
           </view>
-          <view wx:else class="guild-avatar guild-avatar-preset"></view>
+          <view wx:else class="guild-avatar"
+                style="background:radial-gradient(circle at 32% 24%, rgba(255,240,210,.55), {{home.avatarHue}} 52%, rgba(20,10,16,.92) 100%);">
+            <text class="guild-avatar-initial">{{home.initial}}</text>
+          </view>
         </view>
         <view class="guild-player-text">
           <text class="guild-player-name">{{home.nickname}}</text>
@@ -668,7 +714,7 @@
     </view>
 
     <!-- ========== 房间界面：加入人数 / 准备 / 房主开始 ========== -->
-    <view wx:if="{{screen === 'room'}}" class="screen-layer room-screen">
+    <view wx:if="{{screen === 'room'}}" class="screen-layer room-screen" style="padding-top:{{topRightTop > 14 ? topRightTop : 14}}px;">
       <view class="room-top">
         <view class="room-code-block">
           <text class="room-code-label">房间号</text>
@@ -687,12 +733,17 @@
         <view wx:for="{{roomScreen.seats}}" wx:key="index"
               class="room-seat {{item.ready ? 'is-ready' : ''}} {{item.empty ? 'is-empty' : ''}} {{item.isSelf ? 'is-self' : ''}} {{item.tappable ? 'is-tappable' : ''}}"
               bindtap="onRoomSeatTap" data-index="{{item.index}}">
-          <view wx:if="{{item.avatarUrl}}" class="room-avatar">
-            <image class="room-avatar-img" src="{{item.avatarUrl}}" mode="aspectFill"></image>
-          </view>
-          <view wx:else class="room-avatar {{item.empty ? 'is-empty' : ''}}"
-                style="background:radial-gradient(circle at 32% 24%, rgba(255,240,210,.55), {{item.avatarHue}} 52%, rgba(20,10,16,.92) 100%);">
-            <text class="room-avatar-no">{{item.empty ? '+' : item.initial}}</text>
+          <view class="room-avatar-wrap">
+            <view wx:if="{{item.avatarUrl}}" class="room-avatar">
+              <image class="room-avatar-img" src="{{item.avatarUrl}}" mode="aspectFill"></image>
+            </view>
+            <view wx:else class="room-avatar {{item.empty ? 'is-empty' : ''}}"
+                  style="background:radial-gradient(circle at 32% 24%, rgba(255,240,210,.55), {{item.avatarHue}} 52%, rgba(20,10,16,.92) 100%);">
+              <text class="room-avatar-no">{{item.empty ? '+' : item.initial}}</text>
+            </view>
+            <view wx:if="{{item.isBot}}" class="robot-badge is-room is-bot">
+              <view class="robot-logo-icon"></view>
+            </view>
           </view>
           <text class="room-seat-label">{{item.label}}</text>
           <text class="room-seat-name">{{item.name}}</text>
@@ -785,6 +836,41 @@
           <view wx:if="{{detail.canBuy && detail.canAct}}" class="btn btn-primary" bindtap="onBuyFromDetail">{{detail.buyLabel}}</view>
           <view wx:if="{{!detail.canBuy && detail.canReserve && detail.canAct}}" class="btn" bindtap="onReserveFromDetail">预留此卡</view>
           <view class="btn" bindtap="onCloseDetail">返回牌桌</view>
+        </view>
+      </view>
+    </view>
+
+    <!-- ========== 组件：贵族详情（点击桌面贵族卡放大查看标题与红利进度） ========== -->
+    <view wx:if="{{nobleDetail}}" class="overlay" bindtap="onCloseNobleDetail">
+      <view class="dialog noble-detail-dialog" catchtap="noop">
+        <view class="dialog-head">
+          <text class="dialog-title">{{nobleDetail.title}}</text>
+          <text class="dialog-sub">贵族牌 · 到访即获 +{{nobleDetail.points}} 声望（回合末自动判定，不消耗筹码）</text>
+        </view>
+        <view class="detail-body">
+          <view class="noble noble-pick noble-detail-card">
+            <view class="noble-face"><view class="noble-photo {{nobleDetail.photoClass}} {{nobleDetail.artClass}}"></view></view>
+            <text class="noble-points">{{nobleDetail.points}}</text>
+            <text class="noble-title">{{nobleDetail.title}}</text>
+            <view class="noble-reqs">
+              <view wx:for="{{nobleDetail.reqs}}" wx:for-item="req" wx:key="key"
+                    class="noble-req gem-icon {{req.gemClass}}">
+                <text>{{req.num}}</text>
+              </view>
+            </view>
+          </view>
+          <view class="detail-info">
+            <text class="detail-section">永久红利需求 · 我的进度</text>
+            <view wx:for="{{nobleDetail.reqs}}" wx:for-item="req" wx:key="key" class="cost-line {{req.met ? '' : 'is-missing'}}">
+              <view class="cost-line-dot gem-icon {{req.gemClass}}"></view>
+              <text class="cost-line-label">{{req.label}}</text>
+              <text class="cost-line-num">需要 {{req.num}} · 当前红利 {{req.have}}{{req.met ? '（已满足）' : '（还差 ' + req.missing + '）'}}</text>
+            </view>
+            <text class="detail-summary {{nobleDetail.ready ? 'ok' : 'no'}}">{{nobleDetail.summary}}</text>
+          </view>
+        </view>
+        <view class="dialog-btns">
+          <view class="btn btn-primary" bindtap="onCloseNobleDetail">返回牌桌</view>
         </view>
       </view>
     </view>
@@ -1021,11 +1107,18 @@
         </view>
         <view class="player-body">
           <view class="player-left">
-            <view wx:if="{{playerDetail.avatarUrl}}" class="player-avatar">
-              <image class="player-avatar-img" src="{{playerDetail.avatarUrl}}" mode="aspectFill"></image>
+            <view class="player-avatar-wrap">
+              <view wx:if="{{playerDetail.avatarUrl}}" class="player-avatar">
+                <image class="player-avatar-img" src="{{playerDetail.avatarUrl}}" mode="aspectFill"></image>
+              </view>
+              <view wx:else class="player-avatar"
+                    style="background:radial-gradient(circle at 32% 24%, rgba(255,240,210,.55), {{playerDetail.avatarHue}} 52%, rgba(20,10,16,.92) 100%);">
+                <text class="player-avatar-initial">{{playerDetail.initial}}</text>
+              </view>
+              <view wx:if="{{playerDetail.isBot || playerDetail.autoPlay}}" class="robot-badge is-room {{playerDetail.autoPlay ? 'is-auto' : 'is-bot'}}">
+                <view class="robot-logo-icon"></view>
+              </view>
             </view>
-            <view wx:else class="player-avatar"
-                  style="background:radial-gradient(circle at 32% 24%, rgba(255,240,210,.55), {{playerDetail.avatarHue}} 52%, rgba(20,10,16,.92) 100%);"></view>
             <text class="player-score">{{playerDetail.points}} / 15 声望</text>
             <text class="player-mini">发展卡 {{playerDetail.cardCount}} · 预留 {{playerDetail.reservedCount}} · 筹码 {{playerDetail.totalTokens}}/10</text>
             <text class="detail-section">声望构成</text>
@@ -1093,7 +1186,10 @@
         <view class="profile-body">
           <view class="profile-current">
             <view wx:if="{{profileDialog.avatarUrl}}" class="profile-avatar"><image class="profile-avatar-img" src="{{profileDialog.avatarUrl}}" mode="aspectFill"></image></view>
-            <view wx:else class="profile-avatar profile-avatar-preset"></view>
+            <view wx:else class="profile-avatar profile-avatar-preset"
+                  style="background:radial-gradient(circle at 32% 24%, rgba(255,240,210,.55), {{profileDialog.avatarHue}} 52%, rgba(20,10,16,.92) 100%);">
+              <text class="profile-avatar-initial">{{profileDialog.initial}}</text>
+            </view>
             <view class="profile-current-text">
               <text class="profile-nickname">{{profileDialog.nickname}}</text>
               <text class="profile-avatar-name">当前头像：{{profileDialog.avatarName}}</text>

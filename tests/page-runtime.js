@@ -959,32 +959,66 @@ console.log('OK  号位标注 · 席位条 / 工作台 / 状态行同一口径')
   console.log('OK  随机 1 号位 · 分布覆盖四席 / 编号顺延 / 越界回退 / 席位顺序不变');
 }
 
-/* ---------- 右上工具条收起：不遮挡牌桌 ---------- */
+/* ---------- 悬浮菜单：避开微信胶囊、清晰标签、支持拖拽与边界钳制 ---------- */
 {
   page.mode = 'room';
   page.mySeat = 0;
   page.ui.screen = 'game';
   page.refresh('');
-  assert(page.data.topRightCollapsed === false, '工具条默认展开');
-  assert(page.data.topRightToggleLabel === '×', '展开态手柄显示收起符号：' + page.data.topRightToggleLabel);
+  assert(page.data.menuOpen === false, '悬浮菜单默认收起停靠，不遮挡牌桌');
+  assert(page.data.menuToggleLabel === '菜单', '收起态按钮应明确标出「菜单」：' + page.data.menuToggleLabel);
+  assert(page.data.menuY >= 400, '默认停靠在底部安全区，避开微信右上角胶囊：y=' + page.data.menuY);
+  assert(page.data.menuDirClass.indexOf('open-left') >= 0 && page.data.menuDirClass.indexOf('open-up') >= 0,
+    '默认右下角停靠应向左上方展开');
 
-  page.ui.chatPanelOpen = true;
-  page.onToggleTopRight();
-  assert(page.data.topRightCollapsed === true, '可以收起工具条');
-  assert(page.data.topRightToggleLabel === '☰', '收起态手柄显示展开符号：' + page.data.topRightToggleLabel);
-  assert(page.ui.chatPanelOpen === false, '收起时顺带关掉聊天面板，避免面板悬空');
+  page.onToggleMenu();
+  assert(page.data.menuOpen === true, '点击「菜单」应展开悬浮窗');
+  assert(page.data.menuToggleLabel === '收起', '展开态按钮应显示「收起」：' + page.data.menuToggleLabel);
 
-  page.onToggleTopRight();
-  assert(page.data.topRightCollapsed === false, '可以再次展开');
-  assert(page.data.topRightToggleLabel === '×', '展开态恢复收起符号');
+  // 拖拽：从右下角拖向左上角并验证边界钳制与展开方向自适应
+  page.onMenuTouchStart({ touches: [{ clientX: 900, clientY: 500 }] });
+  page.onMenuTouchMove({ touches: [{ clientX: 100, clientY: 50 }] });
+  page.onMenuTouchEnd();
+  assert(page.data.menuX < 540 && page.data.menuY < 260, '拖拽后菜单应移动到左上半区');
+  assert(page.data.menuDirClass.indexOf('open-right') >= 0 && page.data.menuDirClass.indexOf('open-down') >= 0,
+    '拖到左上方后展开方向应自动切为向右下：' + page.data.menuDirClass);
 
-  // 非牌桌屏不应响应，避免在大厅误触
+  // 拖拽结束后的残余点击不应误触发收起/展开
+  const openAfterDrag = page.data.menuOpen;
+  page.onToggleMenu();
+  assert(page.data.menuOpen === openAfterDrag, '刚结束拖拽时的残余 tap 不应误切换菜单');
+  page._menuSuppressTapUntil = 0;
+
+  // 越界拖拽应钳制在舞台内
+  page.onMenuTouchStart({ touches: [{ clientX: 100, clientY: 100 }] });
+  page.onMenuTouchMove({ touches: [{ clientX: -2000, clientY: -2000 }] });
+  page.onMenuTouchEnd();
+  assert(page.data.menuX >= 10 && page.data.menuY >= 10, '越界拖拽必须被钳制在舞台内');
+
+  // 复原默认位置与收起态
+  page.ui.menuX = 1018;
+  page.ui.menuY = 442;
+  page._menuSuppressTapUntil = 0;
+  page.onCloseMenu();
+  assert(page.data.menuOpen === false, '可以收起菜单悬浮窗');
+
+  // 点击自己头像直接触发个人资料；点击其他玩家头像触发玩家详情
+  page.ui.screen = 'game';
+  page.refresh('');
+  page.onTapMyPortrait();
+  assert(page.data.showProfile === true, '点击自己头像应直接打开个人资料');
+  page.onCloseProfile();
+  page.onTapPlayer({ currentTarget: { dataset: { index: 1 } } });
+  assert(page.data.showPlayerDetail === true, '点击其他玩家头像应打开玩家详情');
+  page.onClosePlayerDetail();
+
+  // 非牌桌屏不应响应
   page.ui.screen = 'home';
   page.refresh('');
-  page.onToggleTopRight();
-  assert(page.data.topRightCollapsed === false, '非牌桌屏不响应收起');
+  page.onToggleMenu();
+  assert(page.data.menuOpen === false, '非牌桌屏不响应菜单开关');
 
-  console.log('OK  右上工具条 · 收起展开 / 联动关面板 / 非牌桌不响应');
+  console.log('OK  悬浮菜单 · 胶囊避让 / 中文标签 / 拖拽与方向自适应 / 非牌桌不响应');
 }
 
 /* ---------- 回合计时：建房选定 / 大厅可改 / 超时托管 ---------- */
@@ -1831,6 +1865,23 @@ console.log('OK  终局提示 · 指名达标者 / 剩余回合 / 结算后消�
           assert(page.ui.homeNotice.indexOf('重新输入房间号加入') > 0, '应提示可重新加入');
           require(ROOT + '/utils/room.js').attachCloud(null);
           console.log('OK  被踢感知 · 轮询自动回首页 / 会话作废 / 允许重入');
+          // UI/UX 规范检查：动态非法筹码暗化 / 浮动增量 / 震动反馈
+          let vibrated = 0;
+          global.wx.vibrateShort = function () { vibrated += 1; };
+          page.ui.soloCount = 2;
+          page.onStartSolo();
+          page.onTapPile({ currentTarget: { dataset: { key: 'white' } } });
+          page.onTapPile({ currentTarget: { dataset: { key: 'white' } } });
+          const bluePile = page.data.bankPiles.filter(function (p) { return p.key === 'blue'; })[0];
+          const whitePile = page.data.bankPiles.filter(function (p) { return p.key === 'white'; })[0];
+          assert(bluePile.illegal === true && whitePile.illegal === false, '选 2 枚同色后其余颜色应标 illegal 暗化');
+          page.onConfirmTake();
+          assert(page.data.floatTokenDeltas.length === 1 && page.data.floatTokenDeltas[0].text === '+2',
+            '拿取 2 枚筹码后应产生 +2 浮动增量');
+          assert(vibrated > 0, '交互与确认动作应触发 wx.vibrateShort');
+          delete global.wx.vibrateShort;
+          console.log('OK  UI/UX 规范 · 非法暗化 / +2 浮动增量 / wx.vibrateShort');
+
           page.onUnload();
           console.log('ALL RUNTIME CHECKS PASSED');
         } catch (e2) {
