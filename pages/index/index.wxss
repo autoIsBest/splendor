@@ -2912,19 +2912,32 @@ page, .viewport { width: 100vw; height: 100vh; overflow: hidden; }
   position: absolute; right: 16px; width: 300px; z-index: 11;
   pointer-events: none; display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
 }
+/* 面板本体：不再用带位移的 dialogIn —— 那会让整块内容在 180ms 内边淡入边
+   向上位移 10px，手指按在某个条目上时条目自己还在移动，抬手就落到邻居上。
+   改为纯透明度淡入，元素落点从第一帧起就是最终位置。 */
 .chat-panel {
   width: 300px; box-sizing: border-box; pointer-events: auto;
   padding: 10px; border-radius: 10px;
   border: 1px solid rgba(240, 205, 140, .55);
   background: linear-gradient(180deg, rgba(48, 26, 36, .97), rgba(20, 11, 18, .97));
   box-shadow: 0 10px 26px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 240, 200, .16);
-  animation: dialogIn 180ms cubic-bezier(.2, .8, .3, 1) both;
+  animation: chatPanelIn 120ms ease-out both;
 }
+@keyframes chatPanelIn { 0% { opacity: 0; } 100% { opacity: 1; } }
 .chat-panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .chat-tabs { display: flex; gap: 6px; }
+/* 切换 tab 的误触根因：两个 tab 内容高度差近 100px，切换瞬间面板骤缩 / 骤长，
+   手指还停在原位时新元素正好长到指尖下，抬手就落在别的条目上。
+   给内容区固定高度（取两者较大值），切换只换内容、不动面板尺寸。 */
 .chat-tab {
-  padding: 5px 12px; border-radius: 6px; font-size: 12px; font-weight: 600;
+  position: relative;
+  padding: 9px 18px; border-radius: 7px; font-size: 13px; font-weight: 600;
   color: #ddc7a4; border: 1px solid rgba(226, 190, 126, .35); background: rgba(9, 9, 13, .35);
+}
+/* 触屏热区外扩到约 40px 高：视觉上仍是小胶囊，实际可按面积翻倍，
+   两个 tab 之间也不再需要「精准点中」 */
+.chat-tab::after {
+  content: ''; position: absolute; left: -4px; right: -4px; top: -7px; bottom: -7px;
 }
 .chat-tab.is-active { color: #2a1807; border-color: #f4d48d; background: linear-gradient(180deg, #ffe4a1, #c89238); }
 .chat-close {
@@ -2935,22 +2948,42 @@ page, .viewport { width: 100vw; height: 100vh; overflow: hidden; }
 .chat-close::after {
   content: ''; position: absolute; left: -9px; right: -9px; top: -9px; bottom: -9px;
 }
-.chat-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+/* 内容区定高：快捷语 8 条恰好铺满、表情 3×3、选目标共用同一块高度。
+   原来三态高度各不相同（约 300 / 200 / 260px），每次切换面板都跳一下，
+   既造成误触，也让「刚点完表情、面板缩小」把下面的牌桌露出来被误点。
+   314 = 8 条 × 34px + 7 × 6px 间隙，正好等于快捷语满铺高度。 */
+.chat-body {
+  /* 三态共用同一块高度：8 条 × 34px + 7 × 6px 间隙 = 314，
+     表情 3×3 合计 312，选目标在同一块里滚动。切换只换内容、不动面板尺寸。 */
+  height: 314px;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.chat-grid { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; }
 .chat-grid.is-text { flex-direction: column; }
 .chat-item.is-text {
-  padding: 7px 9px; border-radius: 6px; font-size: 12px; line-height: 1.35; color: #f2dfbd;
+  flex: 0 0 auto;
+  min-height: 34px; box-sizing: border-box;
+  display: flex; align-items: center;
+  padding: 8px 11px; border-radius: 7px; font-size: 12px; line-height: 1.35; color: #f2dfbd;
   border: 1px solid rgba(226, 190, 126, .28); background: rgba(255, 240, 200, .06);
 }
 .chat-item.is-text:active { background: rgba(255, 225, 160, .2); }
+/* 9 个表情排成 3×3 铺满 278px 内宽（88×3 + 6×2 = 276）：
+   原来是 64px 四列、最后一行只剩 1 个，行末空位让手指落到相邻格上。
+   100px 高使 3 行合计 312px ≈ 快捷语满铺 314px，切换时面板几乎不跳。 */
 .chat-item.is-emoji {
-  width: 64px; height: 58px; box-sizing: border-box;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  width: 88px; height: 100px; box-sizing: border-box;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   border-radius: 8px; border: 1px solid rgba(226, 190, 126, .28); background: rgba(255, 240, 200, .06);
 }
 .chat-item.is-emoji:active { background: rgba(255, 225, 160, .2); }
 .chat-item-icon { font-size: 26px; line-height: 1; }
 .chat-item-label { font-size: 10px; color: #dcc39a; }
-.chat-panel-note { display: block; margin-top: 8px; font-size: 10px; color: #a89072; text-align: center; }
+.chat-panel-note {
+  display: block; margin-top: 8px; min-height: 15px;
+  font-size: 10px; color: #a89072; text-align: center;
+}
 
 .chat-feed { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; width: 300px; }
 .chat-bubble {
@@ -3011,12 +3044,15 @@ page, .viewport { width: 100vw; height: 100vh; overflow: hidden; }
 /* ========== 表情第二步：选择目标玩家 ==========
    复用聊天面板的 300px 宽，4 个席位一行两个刚好；
    目标卡只有头像 + 昵称 + 号位，不做复杂信息，避免挑人时读半天。 */
-.chat-target { display: flex; flex-direction: column; gap: 8px; }
+/* 选目标：同样落在 .chat-body 的定高里，只让目标网格自己滚动。
+   4 人局 2 行目标卡 + 「返回选表情」按钮刚好放得下，不需要滚动。 */
+.chat-target { display: flex; flex-direction: column; gap: 8px; height: 100%; }
 .chat-pending {
   display: flex; align-items: center; gap: 8px; padding: 6px 8px;
   border-radius: 7px; border: 1px solid rgba(240, 205, 140, .4);
   background: rgba(255, 235, 190, .08);
 }
+.chat-target-grid { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; overflow-y: auto; }
 .chat-pending-icon { font-size: 24px; line-height: 1; }
 .chat-pending-text { flex: 1; font-size: 11px; color: #ffe9bd; }
 .chat-target-grid { display: flex; flex-wrap: wrap; gap: 6px; }

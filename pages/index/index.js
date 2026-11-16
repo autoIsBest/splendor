@@ -779,8 +779,10 @@ function friendsVM(ui) {
       uid: f.uid,
       // 账号 ID 很长，界面上只露后 6 位，避免占满一行
       shortId: String(f.uid || '').slice(-6),
-      nickname: f.nickname || ('玩家 ' + (i + 1)),
-      initial: String(f.nickname || '玩').slice(0, 1),
+      // 好友昵称来自云端行，虽然 utils/friend.js 读表时已过滤，这里仍过一遍
+      // displayName：展示层出口统一收口，任何新增数据来源都不会漏
+      nickname: displayName(f, '玩家 ' + (i + 1)),
+      initial: String(displayName(f, '玩')).slice(0, 1),
       avatarUrl: f.avatarUrl || '',
       avatarStyle: friendAvatarStyle(f.avatarUrl, hue),
       online: isOnline,
@@ -801,8 +803,8 @@ function friendsVM(ui) {
     query: ui.friendQuery || '',
     found: found ? {
       uid: found.uid,
-      nickname: found.nickname || '珠宝商',
-      initial: String(found.nickname || '珠').slice(0, 1),
+      nickname: displayName(found, '珠宝商'),
+      initial: String(displayName(found, '珠')).slice(0, 1),
       avatarUrl: found.avatarUrl || '',
       avatarStyle: friendAvatarStyle(found.avatarUrl, avatarHue(found.avatar || 'a0'))
     } : null,
@@ -821,7 +823,7 @@ function inviteVM(ui) {
   const it = list[0];
   return {
     id: it.id,
-    fromName: it.fromName,
+    fromName: displayName({ nickname: it.fromName }, '好友'),
     roomCode: it.roomCode,
     more: list.length - 1,
     moreText: list.length > 1 ? ('另有 ' + (list.length - 1) + ' 条邀请') : ''
@@ -881,8 +883,10 @@ function lobbyVM(ui, profile) {
     };
   });
   return {
-    nickname: (profile && profile.nickname) || '珠宝商',
-    initial: ((profile && profile.nickname) || '珠宝商').slice(0, 1),
+    // 大厅顶部是自己的名字，但它是公开展示位（截图 / 分享都会露出），
+    // 与榜单、席位同一口径过滤；设置页（profileVM）才保留原字可编辑。
+    nickname: displayName(profile, '珠宝商'),
+    initial: String(displayName(profile, '珠宝商')).slice(0, 1),
     avatarHue: avatarHue((profile && profile.avatar) || 'a0'),
     avatarUrl: (profile && profile.avatarUrl) || '',
     rankTitle: stats.rankTitle,
@@ -989,10 +993,10 @@ function roomScreenVM(ui, room, profile, mySeat, avatars) {
       empty: !joined && !isBot,
       label: isHost ? '房主' : (isBot ? '机器人' : '席位 ' + (i + 1) + (isSelf ? ' · 你' : '')),
       name: isSelf
-        ? ((profile && profile.nickname) || '珠宝商')
+        ? displayName(profile, '珠宝商')
         : displayName(s, isBot ? '机器人 ' + (i + 1) : '等待好友'),
       initial: String(isSelf
-        ? ((profile && profile.nickname) || '珠宝商')
+        ? displayName(profile, '珠宝商')
         : displayName(s, isBot ? '机器人' : '+')).slice(0, 1),
       avatarHue: avatarHue(isSelf
         ? ((profile && profile.avatar) || 'a0')
@@ -1076,11 +1080,13 @@ function profileVM(ui, profile) {
   const login = U.wechatLoginStatus();
   const stats = U.statsOf();
   return {
-    // 设置页显示原文，不做敏感字过滤：
+    // 设置页输入框与预览标题显示原文，不做敏感字过滤：
     // 用户在输入框里看到「*爸」会以为自己输错了，也没法正常编辑。
-    // 过滤只发生在公开展示处（榜单/席位/聊天/结算）。
+    // 过滤只发生在公开展示处（榜单/席位/聊天/结算/大厅/分享）。
     nickname: draft.nickname || '',
-    initial: String(draft.nickname || '珠宝商').slice(0, 1),
+    // 但头像首字属于「别人也能看到」的展示位（资料弹层会出现在牌桌上），
+    // 仍要脱敏 —— 否则设置页一打开，敏感字首字就又露出来了。
+    initial: String(displayName(draft, '珠宝商')).slice(0, 1),
     avatarUrl: draft.avatarUrl || '',
     avatarHue: avatarHue(draft.avatar || 'a0'),
     avatarName: draft.avatarUrl ? '微信头像' : R.avatarName(draft.avatar),
@@ -1498,7 +1504,7 @@ function buildViewModel(state, ui, layout, ctx) {
       playerDetail: null,
       canUseNativeAvatar: canNativeAvatar,
       toast: ui.toast || '',
-      meName: (profile && profile.nickname) || '珠宝商',
+      meName: displayName(profile, '珠宝商'),
       meAvatarHue: avatarHue((profile && profile.avatar) || 'a0'),
       playerCount: (room && room.playerCount) || ui.playerCount || 2,
       roomCode: room ? room.code : '',
@@ -1728,7 +1734,7 @@ function buildViewModel(state, ui, layout, ctx) {
       waiting: pn.seat !== seat,
       seatNo: pnSeat,
       seatLabel: pnSeat + ' 号位',
-      name: pnActor.nickname || pnActor.name || ('玩家 ' + pnSeat),
+      name: displayName(pnActor, '玩家 ' + pnSeat),
       options: options
     };
   }
@@ -1793,7 +1799,7 @@ function buildViewModel(state, ui, layout, ctx) {
   } else if (needDiscard) statusText = '请退还筹码';
   else if (isMyTurn) statusText = '你的回合 · ' + E.seatNoOf(state, seat) + ' 号位';
   else statusText = E.seatNoOf(state, state.current) + ' 号位 · ' +
-    (state.players[state.current].nickname || state.players[state.current].name) + ' 的回合';
+    displayName(state.players[state.current], '玩家') + ' 的回合';
 
   let resultTitle = '';
   let resultDetail = '';
@@ -1803,7 +1809,7 @@ function buildViewModel(state, ui, layout, ctx) {
     else if (state.winner === seat) resultTitle = '你赢了';
     else {
       const w = state.players[state.winner];
-      resultTitle = w ? (w.nickname || w.name) + ' 获胜' : '对局结束';
+      resultTitle = w ? displayName(w, '玩家') + ' 获胜' : '对局结束';
     }
     resultDetail = '共 ' + state.turnCount + ' 回合 · 声望高者胜，同分发展卡少者靠前';
     // 排名表：与引擎 computeWinner 同口径（声望降序、同分发展卡少者靠前）
@@ -1870,7 +1876,7 @@ function buildViewModel(state, ui, layout, ctx) {
     const lp = leader === null ? null : state.players[leader];
     endNotice = {
       leaderSeat: E.seatNoOf(state, leader === null ? 0 : leader),
-      leaderName: lp ? (lp.nickname || lp.name) : '',
+      leaderName: lp ? displayName(lp, '玩家') : '',
       leftText: left > 0 ? ('还剩 ' + left + ' 个回合') : '本轮即将结算'
     };
   }
@@ -1890,6 +1896,9 @@ function buildViewModel(state, ui, layout, ctx) {
         pendingEmoji: ui.chatPendingEmoji || null,
         targets: chatTargetsVM(state, seat, avatars),
         projectiles: ui.chatProjectiles || [],
+        // 防误触窗口的时间戳（见 utils/chat.js 的 TAB_DWELL_MS / TARGET_DWELL_MS）
+        tabSwitchAt: ui.chatTabSwitchAt || 0,
+        pendingAt: ui.chatPendingAt || 0,
         // 气泡 / 定向表情的号位必须跟牌桌同一套编号
         seatStart: Number(state.startSeat) || 0,
         playerCount: state.players.length
@@ -1937,11 +1946,13 @@ function buildViewModel(state, ui, layout, ctx) {
     showLobby: !!ui.showLobby,
     showPlayerDetail: !!ui.showPlayerDetail,
     showProfile: !!ui.showProfile,
-    meName: (profile && profile.nickname) || me.nickname || me.name,
+    // 牌桌层也要声明 me 相关字段：WXML 根变量缺声明会渲染成空
+    meName: displayName(me, (profile && profile.nickname) || me.name || '珠宝商'),
     meAvatarHue: avatarHue((profile && profile.avatar) || me.avatar || 'a0'),
     canUseNativeAvatar: canNativeAvatar,
     rival: {
-      name: rival.name,
+      // 左下角「头号对手」卡片上的名字，是牌桌上最显眼的展示位之一
+      name: displayName(rival, '对手'),
       points: rival.points,
       cardCount: rival.cards.length,
       reservedCount: rival.reserved.length,
@@ -2154,6 +2165,10 @@ function freshUI(config) {
     chatBotCursor: 0,
     // 表情两步发送：先暂存白名单表情，再选目标玩家；投射动画与本局绑定
     chatPendingEmoji: null,
+    // 两个防误触时间戳：切 tab / 进入选目标后极短时间内不接收点选，
+    // 防「手指还停在原位、新内容已长到指尖下」导致的误发（见 utils/chat.js）
+    chatTabSwitchAt: 0,
+    chatPendingAt: 0,
     chatProjectiles: [],
     // 天梯榜：弹层与数据
     showLeaderboard: false,
@@ -2689,7 +2704,8 @@ Page({
     const p = this.profile || {};
     const st = this.state;
     const me = st && st.players[this.mySeat || 0];
-    return String((me && (me.nickname || me.name)) || p.nickname || '我').slice(0, 12);
+    // 聊天昵称会随消息广播给所有人，属于最典型的公开展示位
+    return String(displayName(me, p.nickname || '我')).slice(0, 12);
   },
 
   onToggleChatPanel() {
@@ -2697,7 +2713,14 @@ Page({
     if (Date.now() < (this._menuSuppressTapUntil || 0)) return;
     this.ui.chatPanelOpen = !this.ui.chatPanelOpen;
     // 关面板时清掉未投出的表情，下次打开回到「选表情」而不是半截的「选目标」
-    if (!this.ui.chatPanelOpen) this.ui.chatPendingEmoji = null;
+    if (!this.ui.chatPanelOpen) {
+      this.ui.chatPendingEmoji = null;
+      this.ui.chatPendingAt = 0;
+    } else {
+      // 刚打开也算一次内容刷新：同样给一点缓冲，避免「点聊天按钮的手势
+      // 顺势落到刚弹出的第一条快捷语上」
+      this.ui.chatTabSwitchAt = Date.now();
+    }
     this.refresh('');
   },
 
@@ -2944,20 +2967,27 @@ Page({
     if (!this.ui.chatPanelOpen) return;
     this.ui.chatPanelOpen = false;
     this.ui.chatPendingEmoji = null;
+    this.ui.chatPendingAt = 0;
     this.refresh('');
   },
 
   onSwitchChatTab(event) {
     const tab = event && event.currentTarget && event.currentTarget.dataset.tab;
     if (tab !== 'text' && tab !== 'emoji') return;
+    // 点当前已选中的 tab 直接忽略：重渲染既闪一下又重置防误触窗口
+    if (this.ui.chatTab === tab) return;
     this.ui.chatTab = tab;
     this.ui.chatPendingEmoji = null;
+    // 切换后记下时刻：VM 据此在极短时间内不接收内容区点选，
+    // 防「手指还按在原来那条上，新内容已长到指尖下」
+    this.ui.chatTabSwitchAt = Date.now();
     this.refresh('');
   },
 
   onCancelChatTarget() {
     if (!this.ui.chatPendingEmoji) return;
     this.ui.chatPendingEmoji = null;
+    this.ui.chatPendingAt = 0;
     this.refresh('');
   },
 
@@ -2973,6 +3003,12 @@ Page({
     // 那会把伪造的 kind 静默降级成合法值，白名单只剩 id 一道，等于给客户端开了个口子。
     const kind = ds.kind;
     if (kind !== 'text' && kind !== 'emoji') return;
+    // 防误触：刚切完 tab 的极短窗口内忽略内容区点选。
+    // 这不是「时间没到就不让操作」，而是「这一下很可能是上一次点击的余波」。
+    // 只按时间判定、不额外清标记：窗口一过自动恢复，行为可预测。
+    if (Date.now() - (this.ui.chatTabSwitchAt || 0) < C.TAB_DWELL_MS) return;
+    // 已进入「选目标」阶段时，表情格里不该再接收点选（内容已经换过一轮）
+    if (kind === 'emoji' && this.ui.chatPendingEmoji) return;
     const preset = C.findPreset(kind, ds.id);
     if (!preset) return;                       // 伪造 / 越界 id 直接丢弃
     if (kind === 'emoji') {
@@ -2980,6 +3016,7 @@ Page({
       // 不在这一步发送，玩家就没法指定「西红柿扔给谁」。
       this.ui.chatTab = 'emoji';
       this.ui.chatPendingEmoji = preset;
+      this.ui.chatPendingAt = Date.now();
       this.ui.chatPanelOpen = true;
       this.refresh('选一个玩家，把「' + preset.label + '」投给他');
       return;
@@ -2996,6 +3033,10 @@ Page({
     if (this.ui.screen !== 'game' || !this.state) return;
     const pending = this.ui.chatPendingEmoji;
     if (!pending) return;
+    // 防误触：刚进入「选目标」的极短窗口内不接收点选。
+    // 「连点两下表情 → 第二下直接投给某个玩家」是最常见的误发，
+    // 这个窗口让第二下失效，用户必须重新抬起手指再选。
+    if (Date.now() - (this.ui.chatPendingAt || 0) < C.TARGET_DWELL_MS) return;
     // 二次白名单校验：pending 只能是 findPreset 返回的那个常量对象。
     // 客户端塞进来的伪对象（伪造 icon / tone / aim）一律丢弃。
     if (C.findPreset('emoji', pending.id) !== pending) return;
@@ -3007,6 +3048,7 @@ Page({
       'emoji', pending, Date.now(), seat);
     this.pushChatMessage(msg, true);
     this.ui.chatPendingEmoji = null;
+    this.ui.chatPendingAt = 0;
     this.ui.chatPanelOpen = false;
     this.showChatProjectile(msg);
     this.refresh('已向 ' + E.seatNoOf(this.state, seat) + ' 号位' + pending.label);
@@ -3391,7 +3433,7 @@ Page({
     const seat = this.mySeat || 0;
     const mine = st.current === seat;
     const label = mine ? '超时 · 机器人已代为完成本回合'
-      : (actor.nickname || actor.name) + ' 超时 · 已代为完成本回合';
+      : displayName(actor, '玩家') + ' 超时 · 已代为完成本回合';
     const finished = this.runForcedTurn(label);
     if (finished) {
       this._timeoutFailures = 0;
@@ -3922,7 +3964,7 @@ Page({
         that.refresh('');
         return;
       }
-      that.ui.friendsNotice = '已添加 ' + found.nickname + ' 为好友';
+      that.ui.friendsNotice = '已添加 ' + displayName(found, '好友') + ' 为好友';
       that.ui.friendFound = null;
       that.ui.friendQuery = '';
       that.loadFriends().then(function () { that.refresh(''); });
@@ -3955,7 +3997,7 @@ Page({
     if (typeof wx !== 'undefined' && wx.showModal) {
       wx.showModal({
         title: '删除好友',
-        content: '确定删除「' + row.nickname + '」吗？删除后需要重新添加才能再邀请。',
+        content: '确定删除「' + displayName(row, '该好友') + '」吗？删除后需要重新添加才能再邀请。',
         confirmText: '删除',
         cancelText: '取消',
         success: function (r) { if (r.confirm) doRemove(); }
@@ -3978,14 +4020,16 @@ Page({
       return;
     }
     if (!row.online) {
-      this.ui.friendsNotice = row.nickname + ' 当前不在线，邀请会收不到';
+      this.ui.friendsNotice = displayName(row, '好友') + ' 当前不在线，邀请会收不到';
       this.refresh('');
       return;
     }
     const me = this.profile || R.getProfile();
-    F.sendInvite(me.uid, uid, code, me.nickname).then(function (res) {
+    // 邀请落库的是 from_name，接收方弹窗直接展示。写入端先脱敏，
+    // 这样即使对方是旧版本客户端（没有展示层过滤）也不会看到原字。
+    F.sendInvite(me.uid, uid, code, displayName(me, '好友')).then(function (res) {
       that.ui.friendsNotice = res && res.ok
-        ? ('已邀请 ' + row.nickname + ' 加入房间 ' + code)
+        ? ('已邀请 ' + displayName(row, '好友') + ' 加入房间 ' + code)
         : ((res && res.error) || '邀请发送失败');
       that.refresh('');
     }).catch(function () {
@@ -4139,7 +4183,7 @@ Page({
     if (!s || s.gameOver) return;
     if (!force && !needsAutoPlay(s, this.aiContext())) return;
     const actorSeat = s.current;
-    const actor = s.players[actorSeat].nickname || s.players[actorSeat].name;
+    const actor = displayName(s.players[actorSeat], '玩家');
     const aiAction = AI.chooseAction(s);
     const card = this.actionCard(aiAction, actorSeat);
     const nextSeq = (this._showcaseSeq = (this._showcaseSeq || 0) + 1);
@@ -5000,7 +5044,7 @@ Page({
       return;
     }
     const that = this;
-    const name = String(seat.nickname || seat.name || '该玩家');
+    const name = displayName(seat, '该玩家');
     const uid = String(seat.uid);
     const doKick = function () {
       const before = that.room && that.room.seats[i];

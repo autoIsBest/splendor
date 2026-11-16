@@ -21,11 +21,27 @@
  */
 
 const CHAT_TABLE = 'splendor_chat';
+// 依赖必须在模块顶部 require：写在 module.exports 之后虽然在本文件里能跑通
+// （函数调用时才解析 Nick），但 H5 预览的 __def 是立即执行，模块末尾的
+// require 一旦被后续改动挪位就会变成 module not found。
+const Nick = require('./nickname.js');
 const BUBBLE_TTL_MS = 2800;   // 气泡停留时长
 const FLY_TTL_MS = 1600;      // 大表情飞入动画时长（旧版全屏效果，保留兼容）
 const PROJECTILE_TTL_MS = 1500; // 定向表情飞行 + 命中动画时长
 const WINDOW_MS = 60000;      // 云端只拉最近 60 秒，避免历史消息反复弹出
 const MAX_LOCAL = 24;         // 本机消息队列上限
+
+/* 切换防误触：面板换一批内容后，短时间内不接收点选。
+ * ------------------------------------------------------------------
+ * 真机上「想切 tab，结果发出去一条快捷语」「刚点完表情，第二下就投给了
+ * 某个玩家」都是同一个原因：新内容在手指抬起前就长到了指尖下。
+ * 两道短缓冲比让用户「点准一点」更可靠：
+ *   TAB_DWELL_MS    — 切 tab 后，忽略内容区的点选（tab 本身已加大热区）
+ *   TARGET_DWELL_MS — 进入「选目标」后，忽略目标点选（防止连点直接投出去）
+ * 320ms 小于人的连点间隔上限（约 300~400ms），正常操作感知不到，
+ * 但足以跨过「内容替换 → 重新渲染」这段窗口。 */
+const TAB_DWELL_MS = 220;
+const TARGET_DWELL_MS = 320;
 
 /* 常用短语：语气偏娱乐，不含挑衅 / 诱导分享 / 博彩暗示 */
 const QUICK_TEXTS = [
@@ -181,6 +197,10 @@ async function list(cloud, roomCode, now) {
 function chatVM(messages, mySeat, now, panelOpen, tab, opts) {
   const o = opts || {};
   const t = typeof now === 'number' ? now : Date.now();
+  // 防误触窗口：now 与最近一次切换时刻的差值小于阈值时，内容区暂时不接收点选。
+  // 判定放在 VM 里（而不是页面的事件里），H5 预览与真机走同一份逻辑。
+  const tabLocked = typeof o.tabSwitchAt === 'number' && (t - o.tabSwitchAt) < TAB_DWELL_MS;
+  const targetLocked = typeof o.pendingAt === 'number' && (t - o.pendingAt) < TARGET_DWELL_MS;
   // 气泡里的号位必须跟牌桌同一套编号：本局 1 号位由 startSeat 随机抽出，
   // 沿数组索引顺延。没传锚点（老调用 / 非牌桌屏）时退回原来的 index+1。
   function seatNo(i) {
@@ -224,6 +244,10 @@ function chatVM(messages, mySeat, now, panelOpen, tab, opts) {
     isPick: !isTarget,
     isTarget: isTarget,
     pending: pending,
+    // 两个防误触锁分别门禁「内容区点选」与「目标点选」，
+    // WXML 用它加 is-locked 类做半透明提示（可选），事件里用它短路
+    tabLocked: tabLocked,
+    targetLocked: targetLocked,
     texts: QUICK_TEXTS,
     emojis: QUICK_EMOJIS,
     targets: o.targets || [],
@@ -240,6 +264,8 @@ module.exports = {
   PROJECTILE_TTL_MS: PROJECTILE_TTL_MS,
   WINDOW_MS: WINDOW_MS,
   MAX_LOCAL: MAX_LOCAL,
+  TAB_DWELL_MS: TAB_DWELL_MS,
+  TARGET_DWELL_MS: TARGET_DWELL_MS,
   QUICK_TEXTS: QUICK_TEXTS,
   QUICK_EMOJIS: QUICK_EMOJIS,
   BOT_REPLIES: BOT_REPLIES,
@@ -253,4 +279,3 @@ module.exports = {
   list: list,
   chatVM: chatVM
 };
-const Nick = require('./nickname.js');

@@ -338,7 +338,8 @@ function shareMessage(room, profile) {
   return {
     title: '璀璨宝石 · ' + (room ? room.playerCount : 2) + ' 人牌局，等你入席',
     path: '/pages/index/index?room=' + code,
-    desc: p.nickname + ' 邀请你加入房间 ' + code,
+    // desc 会出现在分享卡片上，属于公开展示位：与席位 / 榜单同一口径脱敏
+    desc: Nick.maskName(p.nickname) + ' 邀请你加入房间 ' + code,
     imageUrl: ''
   };
 }

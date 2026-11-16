@@ -201,7 +201,8 @@ async function listInvites(myUid) {
       return {
         id: r.id,
         fromUid: r.from_uid,
-        fromName: r.from_name || '好友',
+        // 邀请人昵称会直接显示在弹窗标题上，必须与席位 / 榜单同一口径脱敏
+        fromName: Nick.maskName(r.from_name || '') || '好友',
         roomCode: r.room_code,
         at: r.created_at
       };

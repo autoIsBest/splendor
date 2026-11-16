@@ -3564,19 +3564,32 @@ page, .viewport { width: 100vw; height: 100vh; overflow: hidden; }
   position: absolute; right: 16px; width: 300px; z-index: 11;
   pointer-events: none; display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
 }
+/* 面板本体：不再用带位移的 dialogIn —— 那会让整块内容在 180ms 内边淡入边
+   向上位移 10px，手指按在某个条目上时条目自己还在移动，抬手就落到邻居上。
+   改为纯透明度淡入，元素落点从第一帧起就是最终位置。 */
 .chat-panel {
   width: 300px; box-sizing: border-box; pointer-events: auto;
   padding: 10px; border-radius: 10px;
   border: 1px solid rgba(240, 205, 140, .55);
   background: linear-gradient(180deg, rgba(48, 26, 36, .97), rgba(20, 11, 18, .97));
   box-shadow: 0 10px 26px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 240, 200, .16);
-  animation: dialogIn 180ms cubic-bezier(.2, .8, .3, 1) both;
+  animation: chatPanelIn 120ms ease-out both;
 }
+@keyframes chatPanelIn { 0% { opacity: 0; } 100% { opacity: 1; } }
 .chat-panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .chat-tabs { display: flex; gap: 6px; }
+/* 切换 tab 的误触根因：两个 tab 内容高度差近 100px，切换瞬间面板骤缩 / 骤长，
+   手指还停在原位时新元素正好长到指尖下，抬手就落在别的条目上。
+   给内容区固定高度（取两者较大值），切换只换内容、不动面板尺寸。 */
 .chat-tab {
-  padding: 5px 12px; border-radius: 6px; font-size: 12px; font-weight: 600;
+  position: relative;
+  padding: 9px 18px; border-radius: 7px; font-size: 13px; font-weight: 600;
   color: #ddc7a4; border: 1px solid rgba(226, 190, 126, .35); background: rgba(9, 9, 13, .35);
+}
+/* 触屏热区外扩到约 40px 高：视觉上仍是小胶囊，实际可按面积翻倍，
+   两个 tab 之间也不再需要「精准点中」 */
+.chat-tab::after {
+  content: ''; position: absolute; left: -4px; right: -4px; top: -7px; bottom: -7px;
 }
 .chat-tab.is-active { color: #2a1807; border-color: #f4d48d; background: linear-gradient(180deg, #ffe4a1, #c89238); }
 .chat-close {
@@ -3587,22 +3600,42 @@ page, .viewport { width: 100vw; height: 100vh; overflow: hidden; }
 .chat-close::after {
   content: ''; position: absolute; left: -9px; right: -9px; top: -9px; bottom: -9px;
 }
-.chat-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+/* 内容区定高：快捷语 8 条恰好铺满、表情 3×3、选目标共用同一块高度。
+   原来三态高度各不相同（约 300 / 200 / 260px），每次切换面板都跳一下，
+   既造成误触，也让「刚点完表情、面板缩小」把下面的牌桌露出来被误点。
+   314 = 8 条 × 34px + 7 × 6px 间隙，正好等于快捷语满铺高度。 */
+.chat-body {
+  /* 三态共用同一块高度：8 条 × 34px + 7 × 6px 间隙 = 314，
+     表情 3×3 合计 312，选目标在同一块里滚动。切换只换内容、不动面板尺寸。 */
+  height: 314px;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.chat-grid { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; }
 .chat-grid.is-text { flex-direction: column; }
 .chat-item.is-text {
-  padding: 7px 9px; border-radius: 6px; font-size: 12px; line-height: 1.35; color: #f2dfbd;
+  flex: 0 0 auto;
+  min-height: 34px; box-sizing: border-box;
+  display: flex; align-items: center;
+  padding: 8px 11px; border-radius: 7px; font-size: 12px; line-height: 1.35; color: #f2dfbd;
   border: 1px solid rgba(226, 190, 126, .28); background: rgba(255, 240, 200, .06);
 }
 .chat-item.is-text:active { background: rgba(255, 225, 160, .2); }
+/* 9 个表情排成 3×3 铺满 278px 内宽（88×3 + 6×2 = 276）：
+   原来是 64px 四列、最后一行只剩 1 个，行末空位让手指落到相邻格上。
+   100px 高使 3 行合计 312px ≈ 快捷语满铺 314px，切换时面板几乎不跳。 */
 .chat-item.is-emoji {
-  width: 64px; height: 58px; box-sizing: border-box;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  width: 88px; height: 100px; box-sizing: border-box;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   border-radius: 8px; border: 1px solid rgba(226, 190, 126, .28); background: rgba(255, 240, 200, .06);
 }
 .chat-item.is-emoji:active { background: rgba(255, 225, 160, .2); }
 .chat-item-icon { font-size: 26px; line-height: 1; }
 .chat-item-label { font-size: 10px; color: #dcc39a; }
-.chat-panel-note { display: block; margin-top: 8px; font-size: 10px; color: #a89072; text-align: center; }
+.chat-panel-note {
+  display: block; margin-top: 8px; min-height: 15px;
+  font-size: 10px; color: #a89072; text-align: center;
+}
 
 .chat-feed { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; width: 300px; }
 .chat-bubble {
@@ -3663,12 +3696,15 @@ page, .viewport { width: 100vw; height: 100vh; overflow: hidden; }
 /* ========== 表情第二步：选择目标玩家 ==========
    复用聊天面板的 300px 宽，4 个席位一行两个刚好；
    目标卡只有头像 + 昵称 + 号位，不做复杂信息，避免挑人时读半天。 */
-.chat-target { display: flex; flex-direction: column; gap: 8px; }
+/* 选目标：同样落在 .chat-body 的定高里，只让目标网格自己滚动。
+   4 人局 2 行目标卡 + 「返回选表情」按钮刚好放得下，不需要滚动。 */
+.chat-target { display: flex; flex-direction: column; gap: 8px; height: 100%; }
 .chat-pending {
   display: flex; align-items: center; gap: 8px; padding: 6px 8px;
   border-radius: 7px; border: 1px solid rgba(240, 205, 140, .4);
   background: rgba(255, 235, 190, .08);
 }
+.chat-target-grid { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; overflow-y: auto; }
 .chat-pending-icon { font-size: 24px; line-height: 1; }
 .chat-pending-text { flex: 1; font-size: 11px; color: #ffe9bd; }
 .chat-target-grid { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -5623,7 +5659,8 @@ function shareMessage(room, profile) {
   return {
     title: '璀璨宝石 · ' + (room ? room.playerCount : 2) + ' 人牌局，等你入席',
     path: '/pages/index/index?room=' + code,
-    desc: p.nickname + ' 邀请你加入房间 ' + code,
+    // desc 会出现在分享卡片上，属于公开展示位：与席位 / 榜单同一口径脱敏
+    desc: Nick.maskName(p.nickname) + ' 邀请你加入房间 ' + code,
     imageUrl: ''
   };
 }
@@ -7305,7 +7342,8 @@ async function listInvites(myUid) {
       return {
         id: r.id,
         fromUid: r.from_uid,
-        fromName: r.from_name || '好友',
+        // 邀请人昵称会直接显示在弹窗标题上，必须与席位 / 榜单同一口径脱敏
+        fromName: Nick.maskName(r.from_name || '') || '好友',
         roomCode: r.room_code,
         at: r.created_at
       };
@@ -7407,11 +7445,27 @@ __def("chat", function (module, exports, require) {
  */
 
 const CHAT_TABLE = 'splendor_chat';
+// 依赖必须在模块顶部 require：写在 module.exports 之后虽然在本文件里能跑通
+// （函数调用时才解析 Nick），但 H5 预览的 __def 是立即执行，模块末尾的
+// require 一旦被后续改动挪位就会变成 module not found。
+const Nick = require('./nickname.js');
 const BUBBLE_TTL_MS = 2800;   // 气泡停留时长
 const FLY_TTL_MS = 1600;      // 大表情飞入动画时长（旧版全屏效果，保留兼容）
 const PROJECTILE_TTL_MS = 1500; // 定向表情飞行 + 命中动画时长
 const WINDOW_MS = 60000;      // 云端只拉最近 60 秒，避免历史消息反复弹出
 const MAX_LOCAL = 24;         // 本机消息队列上限
+
+/* 切换防误触：面板换一批内容后，短时间内不接收点选。
+ * ------------------------------------------------------------------
+ * 真机上「想切 tab，结果发出去一条快捷语」「刚点完表情，第二下就投给了
+ * 某个玩家」都是同一个原因：新内容在手指抬起前就长到了指尖下。
+ * 两道短缓冲比让用户「点准一点」更可靠：
+ *   TAB_DWELL_MS    — 切 tab 后，忽略内容区的点选（tab 本身已加大热区）
+ *   TARGET_DWELL_MS — 进入「选目标」后，忽略目标点选（防止连点直接投出去）
+ * 320ms 小于人的连点间隔上限（约 300~400ms），正常操作感知不到，
+ * 但足以跨过「内容替换 → 重新渲染」这段窗口。 */
+const TAB_DWELL_MS = 220;
+const TARGET_DWELL_MS = 320;
 
 /* 常用短语：语气偏娱乐，不含挑衅 / 诱导分享 / 博彩暗示 */
 const QUICK_TEXTS = [
@@ -7567,6 +7621,10 @@ async function list(cloud, roomCode, now) {
 function chatVM(messages, mySeat, now, panelOpen, tab, opts) {
   const o = opts || {};
   const t = typeof now === 'number' ? now : Date.now();
+  // 防误触窗口：now 与最近一次切换时刻的差值小于阈值时，内容区暂时不接收点选。
+  // 判定放在 VM 里（而不是页面的事件里），H5 预览与真机走同一份逻辑。
+  const tabLocked = typeof o.tabSwitchAt === 'number' && (t - o.tabSwitchAt) < TAB_DWELL_MS;
+  const targetLocked = typeof o.pendingAt === 'number' && (t - o.pendingAt) < TARGET_DWELL_MS;
   // 气泡里的号位必须跟牌桌同一套编号：本局 1 号位由 startSeat 随机抽出，
   // 沿数组索引顺延。没传锚点（老调用 / 非牌桌屏）时退回原来的 index+1。
   function seatNo(i) {
@@ -7610,6 +7668,10 @@ function chatVM(messages, mySeat, now, panelOpen, tab, opts) {
     isPick: !isTarget,
     isTarget: isTarget,
     pending: pending,
+    // 两个防误触锁分别门禁「内容区点选」与「目标点选」，
+    // WXML 用它加 is-locked 类做半透明提示（可选），事件里用它短路
+    tabLocked: tabLocked,
+    targetLocked: targetLocked,
     texts: QUICK_TEXTS,
     emojis: QUICK_EMOJIS,
     targets: o.targets || [],
@@ -7626,6 +7688,8 @@ module.exports = {
   PROJECTILE_TTL_MS: PROJECTILE_TTL_MS,
   WINDOW_MS: WINDOW_MS,
   MAX_LOCAL: MAX_LOCAL,
+  TAB_DWELL_MS: TAB_DWELL_MS,
+  TARGET_DWELL_MS: TARGET_DWELL_MS,
   QUICK_TEXTS: QUICK_TEXTS,
   QUICK_EMOJIS: QUICK_EMOJIS,
   BOT_REPLIES: BOT_REPLIES,
@@ -7639,7 +7703,6 @@ module.exports = {
   list: list,
   chatVM: chatVM
 };
-const Nick = require('./nickname.js');
 
 });
 __def("leaderboard", function (module, exports, require) {
@@ -10516,6 +10579,11 @@ window.renderStage = function (data) {
       $h.push("</text>");
       $h.push("</div>");
       $h.push("</div>");
+      $h.push("<div");
+      $h.push(" class=\"");
+      $h.push(ESC("chat-body"));
+      $h.push("\"");
+      $h.push(">");
       if (EV(199, $s)) {
         $h.push("<div");
         $h.push(" class=\"");
@@ -10693,6 +10761,7 @@ window.renderStage = function (data) {
         $h.push("</div>");
         $h.push("</div>");
       }
+      $h.push("</div>");
       if (EV(199, $s)) {
         $h.push("<text");
         $h.push(" class=\"");
@@ -16352,8 +16421,10 @@ function friendsVM(ui) {
       uid: f.uid,
       // 账号 ID 很长，界面上只露后 6 位，避免占满一行
       shortId: String(f.uid || '').slice(-6),
-      nickname: f.nickname || ('玩家 ' + (i + 1)),
-      initial: String(f.nickname || '玩').slice(0, 1),
+      // 好友昵称来自云端行，虽然 utils/friend.js 读表时已过滤，这里仍过一遍
+      // displayName：展示层出口统一收口，任何新增数据来源都不会漏
+      nickname: displayName(f, '玩家 ' + (i + 1)),
+      initial: String(displayName(f, '玩')).slice(0, 1),
       avatarUrl: f.avatarUrl || '',
       avatarStyle: friendAvatarStyle(f.avatarUrl, hue),
       online: isOnline,
@@ -16374,8 +16445,8 @@ function friendsVM(ui) {
     query: ui.friendQuery || '',
     found: found ? {
       uid: found.uid,
-      nickname: found.nickname || '珠宝商',
-      initial: String(found.nickname || '珠').slice(0, 1),
+      nickname: displayName(found, '珠宝商'),
+      initial: String(displayName(found, '珠')).slice(0, 1),
       avatarUrl: found.avatarUrl || '',
       avatarStyle: friendAvatarStyle(found.avatarUrl, avatarHue(found.avatar || 'a0'))
     } : null,
@@ -16394,7 +16465,7 @@ function inviteVM(ui) {
   const it = list[0];
   return {
     id: it.id,
-    fromName: it.fromName,
+    fromName: displayName({ nickname: it.fromName }, '好友'),
     roomCode: it.roomCode,
     more: list.length - 1,
     moreText: list.length > 1 ? ('另有 ' + (list.length - 1) + ' 条邀请') : ''
@@ -16454,8 +16525,10 @@ function lobbyVM(ui, profile) {
     };
   });
   return {
-    nickname: (profile && profile.nickname) || '珠宝商',
-    initial: ((profile && profile.nickname) || '珠宝商').slice(0, 1),
+    // 大厅顶部是自己的名字，但它是公开展示位（截图 / 分享都会露出），
+    // 与榜单、席位同一口径过滤；设置页（profileVM）才保留原字可编辑。
+    nickname: displayName(profile, '珠宝商'),
+    initial: String(displayName(profile, '珠宝商')).slice(0, 1),
     avatarHue: avatarHue((profile && profile.avatar) || 'a0'),
     avatarUrl: (profile && profile.avatarUrl) || '',
     rankTitle: stats.rankTitle,
@@ -16562,10 +16635,10 @@ function roomScreenVM(ui, room, profile, mySeat, avatars) {
       empty: !joined && !isBot,
       label: isHost ? '房主' : (isBot ? '机器人' : '席位 ' + (i + 1) + (isSelf ? ' · 你' : '')),
       name: isSelf
-        ? ((profile && profile.nickname) || '珠宝商')
+        ? displayName(profile, '珠宝商')
         : displayName(s, isBot ? '机器人 ' + (i + 1) : '等待好友'),
       initial: String(isSelf
-        ? ((profile && profile.nickname) || '珠宝商')
+        ? displayName(profile, '珠宝商')
         : displayName(s, isBot ? '机器人' : '+')).slice(0, 1),
       avatarHue: avatarHue(isSelf
         ? ((profile && profile.avatar) || 'a0')
@@ -16649,11 +16722,13 @@ function profileVM(ui, profile) {
   const login = U.wechatLoginStatus();
   const stats = U.statsOf();
   return {
-    // 设置页显示原文，不做敏感字过滤：
+    // 设置页输入框与预览标题显示原文，不做敏感字过滤：
     // 用户在输入框里看到「*爸」会以为自己输错了，也没法正常编辑。
-    // 过滤只发生在公开展示处（榜单/席位/聊天/结算）。
+    // 过滤只发生在公开展示处（榜单/席位/聊天/结算/大厅/分享）。
     nickname: draft.nickname || '',
-    initial: String(draft.nickname || '珠宝商').slice(0, 1),
+    // 但头像首字属于「别人也能看到」的展示位（资料弹层会出现在牌桌上），
+    // 仍要脱敏 —— 否则设置页一打开，敏感字首字就又露出来了。
+    initial: String(displayName(draft, '珠宝商')).slice(0, 1),
     avatarUrl: draft.avatarUrl || '',
     avatarHue: avatarHue(draft.avatar || 'a0'),
     avatarName: draft.avatarUrl ? '微信头像' : R.avatarName(draft.avatar),
@@ -17071,7 +17146,7 @@ function buildViewModel(state, ui, layout, ctx) {
       playerDetail: null,
       canUseNativeAvatar: canNativeAvatar,
       toast: ui.toast || '',
-      meName: (profile && profile.nickname) || '珠宝商',
+      meName: displayName(profile, '珠宝商'),
       meAvatarHue: avatarHue((profile && profile.avatar) || 'a0'),
       playerCount: (room && room.playerCount) || ui.playerCount || 2,
       roomCode: room ? room.code : '',
@@ -17301,7 +17376,7 @@ function buildViewModel(state, ui, layout, ctx) {
       waiting: pn.seat !== seat,
       seatNo: pnSeat,
       seatLabel: pnSeat + ' 号位',
-      name: pnActor.nickname || pnActor.name || ('玩家 ' + pnSeat),
+      name: displayName(pnActor, '玩家 ' + pnSeat),
       options: options
     };
   }
@@ -17366,7 +17441,7 @@ function buildViewModel(state, ui, layout, ctx) {
   } else if (needDiscard) statusText = '请退还筹码';
   else if (isMyTurn) statusText = '你的回合 · ' + E.seatNoOf(state, seat) + ' 号位';
   else statusText = E.seatNoOf(state, state.current) + ' 号位 · ' +
-    (state.players[state.current].nickname || state.players[state.current].name) + ' 的回合';
+    displayName(state.players[state.current], '玩家') + ' 的回合';
 
   let resultTitle = '';
   let resultDetail = '';
@@ -17376,7 +17451,7 @@ function buildViewModel(state, ui, layout, ctx) {
     else if (state.winner === seat) resultTitle = '你赢了';
     else {
       const w = state.players[state.winner];
-      resultTitle = w ? (w.nickname || w.name) + ' 获胜' : '对局结束';
+      resultTitle = w ? displayName(w, '玩家') + ' 获胜' : '对局结束';
     }
     resultDetail = '共 ' + state.turnCount + ' 回合 · 声望高者胜，同分发展卡少者靠前';
     // 排名表：与引擎 computeWinner 同口径（声望降序、同分发展卡少者靠前）
@@ -17443,7 +17518,7 @@ function buildViewModel(state, ui, layout, ctx) {
     const lp = leader === null ? null : state.players[leader];
     endNotice = {
       leaderSeat: E.seatNoOf(state, leader === null ? 0 : leader),
-      leaderName: lp ? (lp.nickname || lp.name) : '',
+      leaderName: lp ? displayName(lp, '玩家') : '',
       leftText: left > 0 ? ('还剩 ' + left + ' 个回合') : '本轮即将结算'
     };
   }
@@ -17463,6 +17538,9 @@ function buildViewModel(state, ui, layout, ctx) {
         pendingEmoji: ui.chatPendingEmoji || null,
         targets: chatTargetsVM(state, seat, avatars),
         projectiles: ui.chatProjectiles || [],
+        // 防误触窗口的时间戳（见 utils/chat.js 的 TAB_DWELL_MS / TARGET_DWELL_MS）
+        tabSwitchAt: ui.chatTabSwitchAt || 0,
+        pendingAt: ui.chatPendingAt || 0,
         // 气泡 / 定向表情的号位必须跟牌桌同一套编号
         seatStart: Number(state.startSeat) || 0,
         playerCount: state.players.length
@@ -17510,11 +17588,13 @@ function buildViewModel(state, ui, layout, ctx) {
     showLobby: !!ui.showLobby,
     showPlayerDetail: !!ui.showPlayerDetail,
     showProfile: !!ui.showProfile,
-    meName: (profile && profile.nickname) || me.nickname || me.name,
+    // 牌桌层也要声明 me 相关字段：WXML 根变量缺声明会渲染成空
+    meName: displayName(me, (profile && profile.nickname) || me.name || '珠宝商'),
     meAvatarHue: avatarHue((profile && profile.avatar) || me.avatar || 'a0'),
     canUseNativeAvatar: canNativeAvatar,
     rival: {
-      name: rival.name,
+      // 左下角「头号对手」卡片上的名字，是牌桌上最显眼的展示位之一
+      name: displayName(rival, '对手'),
       points: rival.points,
       cardCount: rival.cards.length,
       reservedCount: rival.reserved.length,
@@ -17727,6 +17807,10 @@ function freshUI(config) {
     chatBotCursor: 0,
     // 表情两步发送：先暂存白名单表情，再选目标玩家；投射动画与本局绑定
     chatPendingEmoji: null,
+    // 两个防误触时间戳：切 tab / 进入选目标后极短时间内不接收点选，
+    // 防「手指还停在原位、新内容已长到指尖下」导致的误发（见 utils/chat.js）
+    chatTabSwitchAt: 0,
+    chatPendingAt: 0,
     chatProjectiles: [],
     // 天梯榜：弹层与数据
     showLeaderboard: false,
@@ -18262,7 +18346,8 @@ Page({
     const p = this.profile || {};
     const st = this.state;
     const me = st && st.players[this.mySeat || 0];
-    return String((me && (me.nickname || me.name)) || p.nickname || '我').slice(0, 12);
+    // 聊天昵称会随消息广播给所有人，属于最典型的公开展示位
+    return String(displayName(me, p.nickname || '我')).slice(0, 12);
   },
 
   onToggleChatPanel() {
@@ -18270,7 +18355,14 @@ Page({
     if (Date.now() < (this._menuSuppressTapUntil || 0)) return;
     this.ui.chatPanelOpen = !this.ui.chatPanelOpen;
     // 关面板时清掉未投出的表情，下次打开回到「选表情」而不是半截的「选目标」
-    if (!this.ui.chatPanelOpen) this.ui.chatPendingEmoji = null;
+    if (!this.ui.chatPanelOpen) {
+      this.ui.chatPendingEmoji = null;
+      this.ui.chatPendingAt = 0;
+    } else {
+      // 刚打开也算一次内容刷新：同样给一点缓冲，避免「点聊天按钮的手势
+      // 顺势落到刚弹出的第一条快捷语上」
+      this.ui.chatTabSwitchAt = Date.now();
+    }
     this.refresh('');
   },
 
@@ -18517,20 +18609,27 @@ Page({
     if (!this.ui.chatPanelOpen) return;
     this.ui.chatPanelOpen = false;
     this.ui.chatPendingEmoji = null;
+    this.ui.chatPendingAt = 0;
     this.refresh('');
   },
 
   onSwitchChatTab(event) {
     const tab = event && event.currentTarget && event.currentTarget.dataset.tab;
     if (tab !== 'text' && tab !== 'emoji') return;
+    // 点当前已选中的 tab 直接忽略：重渲染既闪一下又重置防误触窗口
+    if (this.ui.chatTab === tab) return;
     this.ui.chatTab = tab;
     this.ui.chatPendingEmoji = null;
+    // 切换后记下时刻：VM 据此在极短时间内不接收内容区点选，
+    // 防「手指还按在原来那条上，新内容已长到指尖下」
+    this.ui.chatTabSwitchAt = Date.now();
     this.refresh('');
   },
 
   onCancelChatTarget() {
     if (!this.ui.chatPendingEmoji) return;
     this.ui.chatPendingEmoji = null;
+    this.ui.chatPendingAt = 0;
     this.refresh('');
   },
 
@@ -18546,6 +18645,12 @@ Page({
     // 那会把伪造的 kind 静默降级成合法值，白名单只剩 id 一道，等于给客户端开了个口子。
     const kind = ds.kind;
     if (kind !== 'text' && kind !== 'emoji') return;
+    // 防误触：刚切完 tab 的极短窗口内忽略内容区点选。
+    // 这不是「时间没到就不让操作」，而是「这一下很可能是上一次点击的余波」。
+    // 只按时间判定、不额外清标记：窗口一过自动恢复，行为可预测。
+    if (Date.now() - (this.ui.chatTabSwitchAt || 0) < C.TAB_DWELL_MS) return;
+    // 已进入「选目标」阶段时，表情格里不该再接收点选（内容已经换过一轮）
+    if (kind === 'emoji' && this.ui.chatPendingEmoji) return;
     const preset = C.findPreset(kind, ds.id);
     if (!preset) return;                       // 伪造 / 越界 id 直接丢弃
     if (kind === 'emoji') {
@@ -18553,6 +18658,7 @@ Page({
       // 不在这一步发送，玩家就没法指定「西红柿扔给谁」。
       this.ui.chatTab = 'emoji';
       this.ui.chatPendingEmoji = preset;
+      this.ui.chatPendingAt = Date.now();
       this.ui.chatPanelOpen = true;
       this.refresh('选一个玩家，把「' + preset.label + '」投给他');
       return;
@@ -18569,6 +18675,10 @@ Page({
     if (this.ui.screen !== 'game' || !this.state) return;
     const pending = this.ui.chatPendingEmoji;
     if (!pending) return;
+    // 防误触：刚进入「选目标」的极短窗口内不接收点选。
+    // 「连点两下表情 → 第二下直接投给某个玩家」是最常见的误发，
+    // 这个窗口让第二下失效，用户必须重新抬起手指再选。
+    if (Date.now() - (this.ui.chatPendingAt || 0) < C.TARGET_DWELL_MS) return;
     // 二次白名单校验：pending 只能是 findPreset 返回的那个常量对象。
     // 客户端塞进来的伪对象（伪造 icon / tone / aim）一律丢弃。
     if (C.findPreset('emoji', pending.id) !== pending) return;
@@ -18580,6 +18690,7 @@ Page({
       'emoji', pending, Date.now(), seat);
     this.pushChatMessage(msg, true);
     this.ui.chatPendingEmoji = null;
+    this.ui.chatPendingAt = 0;
     this.ui.chatPanelOpen = false;
     this.showChatProjectile(msg);
     this.refresh('已向 ' + E.seatNoOf(this.state, seat) + ' 号位' + pending.label);
@@ -18964,7 +19075,7 @@ Page({
     const seat = this.mySeat || 0;
     const mine = st.current === seat;
     const label = mine ? '超时 · 机器人已代为完成本回合'
-      : (actor.nickname || actor.name) + ' 超时 · 已代为完成本回合';
+      : displayName(actor, '玩家') + ' 超时 · 已代为完成本回合';
     const finished = this.runForcedTurn(label);
     if (finished) {
       this._timeoutFailures = 0;
@@ -19495,7 +19606,7 @@ Page({
         that.refresh('');
         return;
       }
-      that.ui.friendsNotice = '已添加 ' + found.nickname + ' 为好友';
+      that.ui.friendsNotice = '已添加 ' + displayName(found, '好友') + ' 为好友';
       that.ui.friendFound = null;
       that.ui.friendQuery = '';
       that.loadFriends().then(function () { that.refresh(''); });
@@ -19528,7 +19639,7 @@ Page({
     if (typeof wx !== 'undefined' && wx.showModal) {
       wx.showModal({
         title: '删除好友',
-        content: '确定删除「' + row.nickname + '」吗？删除后需要重新添加才能再邀请。',
+        content: '确定删除「' + displayName(row, '该好友') + '」吗？删除后需要重新添加才能再邀请。',
         confirmText: '删除',
         cancelText: '取消',
         success: function (r) { if (r.confirm) doRemove(); }
@@ -19551,14 +19662,16 @@ Page({
       return;
     }
     if (!row.online) {
-      this.ui.friendsNotice = row.nickname + ' 当前不在线，邀请会收不到';
+      this.ui.friendsNotice = displayName(row, '好友') + ' 当前不在线，邀请会收不到';
       this.refresh('');
       return;
     }
     const me = this.profile || R.getProfile();
-    F.sendInvite(me.uid, uid, code, me.nickname).then(function (res) {
+    // 邀请落库的是 from_name，接收方弹窗直接展示。写入端先脱敏，
+    // 这样即使对方是旧版本客户端（没有展示层过滤）也不会看到原字。
+    F.sendInvite(me.uid, uid, code, displayName(me, '好友')).then(function (res) {
       that.ui.friendsNotice = res && res.ok
-        ? ('已邀请 ' + row.nickname + ' 加入房间 ' + code)
+        ? ('已邀请 ' + displayName(row, '好友') + ' 加入房间 ' + code)
         : ((res && res.error) || '邀请发送失败');
       that.refresh('');
     }).catch(function () {
@@ -19712,7 +19825,7 @@ Page({
     if (!s || s.gameOver) return;
     if (!force && !needsAutoPlay(s, this.aiContext())) return;
     const actorSeat = s.current;
-    const actor = s.players[actorSeat].nickname || s.players[actorSeat].name;
+    const actor = displayName(s.players[actorSeat], '玩家');
     const aiAction = AI.chooseAction(s);
     const card = this.actionCard(aiAction, actorSeat);
     const nextSeq = (this._showcaseSeq = (this._showcaseSeq || 0) + 1);
@@ -20573,7 +20686,7 @@ Page({
       return;
     }
     const that = this;
-    const name = String(seat.nickname || seat.name || '该玩家');
+    const name = displayName(seat, '该玩家');
     const uid = String(seat.uid);
     const doKick = function () {
       const before = that.room && that.room.seats[i];

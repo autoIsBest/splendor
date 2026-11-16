@@ -243,6 +243,21 @@ async function run() {
     assert.equal(stale.list.length, 0, '超过 10 分钟的邀请不该再弹 —— 否则会莫名加入旧房间');
   });
 
+  /* ---------- 邀请：昵称脱敏（弹窗标题直接显示 from_name） ---------- */
+  await check('邀请：from_name 读回时脱敏', async function () {
+    const mock = mockCloud();
+    R.attachCloud(mock);
+    // 模拟旧版本客户端写进来的未脱敏数据：读端必须兜住
+    mock._store.splendor_invites.push({
+      id: 'iv-legacy', from_uid: 'uC', to_uid: 'uD', room_code: 'ABC234',
+      from_name: '康师傅', status: 'pending', created_at: new Date().toISOString()
+    });
+    const list = await F.listInvites('uD');
+    assert.equal(list.list.length, 1, '旧邀请仍应读到');
+    assert.equal(list.list[0].fromName, '*师傅', '邀请人昵称必须脱敏：' + list.list[0].fromName);
+    assert(list.list[0].fromName.indexOf('康') < 0, '不得残留敏感字');
+  });
+
   /* ---------- 邀请：非法房间号 ---------- */
   await check('邀请：非法房间号直接拒绝', async function () {
     const mock = mockCloud();

@@ -460,6 +460,10 @@
           </view>
           <view class="chat-close" bindtap="onCloseChatPanel"><text>×</text></view>
         </view>
+        <!-- 内容区定高（.chat-body）：快捷语 / 表情 / 选目标三种状态共用同一块高度。
+             原来三态高度各不相同，切换瞬间面板骤缩骤长，手指还停在原位时新条目
+             正好长到指尖下，抬手就误触到别的条目甚至下面的牌桌。 -->
+        <view class="chat-body">
         <!-- 两个 tab 用互斥 wx:if，不用 wx:elif：H5 预览编译器不支持 elif -->
         <view wx:if="{{chat.isText}}" class="chat-grid is-text">
           <view wx:for="{{chat.texts}}" wx:key="id" class="chat-item is-text"
@@ -490,6 +494,7 @@
             </view>
           </view>
           <view class="btn chat-target-back" bindtap="onCancelChatTarget">返回选表情</view>
+        </view>
         </view>
         <text wx:if="{{chat.isText}}" class="chat-panel-note">仅可发送预设短语与表情，点选后立即发出</text>
         <text wx:if="{{chat.isEmoji && chat.isPick}}" class="chat-panel-note">选表情后需再选一名玩家，动画会飞到他的头像上</text>

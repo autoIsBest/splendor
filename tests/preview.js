@@ -292,6 +292,15 @@ const page = a.page;
 function click(method, dataset) {
   page[method]({ type: 'tap', currentTarget: { dataset: dataset || {} }, target: { dataset: dataset || {} } });
 }
+// 聊天面板有防误触窗口（TAB_DWELL_MS / TARGET_DWELL_MS）：连续零间隔点击
+// 会被正确拦下，那不是 bug。预览里的页面跑在独立 JS 上下文，改宿主 Date.now
+// 影响不到它，所以直接把这些时间戳推到过去，等价于「真人等了一会儿再点」。
+const C = require(ROOT + '/utils/chat.js');
+function passDwell() {
+  const past = Date.now() - (C.TAB_DWELL_MS + C.TARGET_DWELL_MS + 500);
+  page.ui.chatTabSwitchAt = past;
+  page.ui.chatPendingAt = past;
+}
 click('onShowRules');
 assert(a.host.innerHTML.indexOf('玩法速览') > 0, '规则弹层应渲染');
 click('onCloseRules');
@@ -414,6 +423,19 @@ console.log('交互链路：规则 / 卡牌详情 / 预留卡 弹层渲染 OK');
   assert(ch.indexOf('💣') > 0, '炸弹表情应渲染');
   assert((ch.match(/data-kind="emoji"/g) || []).length >= 8, '应输出至少 8 个表情按钮');
 
+  // 防误触：切完 tab 后紧接着的那一下必须被忽略（真机上手指还没抬起）
+  {
+    const before = page.ui.chatMessages.length;
+    click('onSendQuickChat', { kind: 'emoji', id: 'e9' });
+    assert(page.ui.chatMessages.length === before && page.data.chat.isTarget === false,
+      '切 tab 后的余波点击必须被防误触窗口拦下');
+    assert(page.data.chat.tabLocked === true, 'VM 应暴露切 tab 的防误触锁状态');
+    // 推进到窗口之外，才等同于一次真实的新点击
+    passDwell();
+    page.refresh('');
+    assert(page.data.chat.tabLocked === false, '窗口过后锁应释放');
+  }
+
   // 表情必须选一名玩家，动画才会飞到那个头像上
   click('onSendQuickChat', { kind: 'emoji', id: 'e9' });
   ch = a.host.innerHTML;
@@ -422,6 +444,15 @@ console.log('交互链路：规则 / 卡牌详情 / 预留卡 弹层渲染 OK');
   assert(ch.indexOf('class="chat-grid is-emoji"') < 0, '选目标时表情格必须消失');
   assert(ch.indexOf('🍅') > 0, '应显示已选中的西红柿');
   assert((ch.match(/data-seat="/g) || []).length >= 2, '每个席位都要有可点击的目标');
+
+  // 防误触：进入选目标后紧接着的那一下不得直接投出去（连点误发）
+  {
+    const before = page.ui.chatMessages.length;
+    click('onPickChatTarget', { seat: 1 });
+    assert(page.ui.chatMessages.length === before && page.data.chat.open === true,
+      '进入选目标后的余波点击不得把表情投出去');
+    passDwell();
+  }
 
   click('onPickChatTarget', { seat: 1 });
   ch = a.host.innerHTML;
@@ -433,13 +464,15 @@ console.log('交互链路：规则 / 卡牌详情 / 预留卡 弹层渲染 OK');
   assert(ch.indexOf('--dx:') > 0, '动画样式必须带位移变量');
 
   // 白名单必须在页面侧也生效：伪造 id / 非法 kind 不得产生任何消息或用户文本
+  // （重新打开面板会刷新一次防误触窗口，先推进时间再点）
   const n0 = page.ui.chatMessages.length;
+  click('onToggleChatPanel');
+  passDwell();
   click('onSendQuickChat', { kind: 'text', id: '随便打的一句话' });
   click('onSendQuickChat', { kind: 'bogus', id: 't1' });
   assert(page.ui.chatMessages.length === n0, '伪造 id / 非法 kind 应整条丢弃');
   assert(a.host.innerHTML.indexOf('随便打的一句话') < 0, '自由输入文本不得出现在页面上');
 
-  click('onToggleChatPanel');
   click('onSendQuickChat', { kind: 'text', id: 't1' });
   assert(a.host.innerHTML.indexOf('快点吧，等到花儿都谢了') > 0, '合法快捷语应渲染到气泡');
 

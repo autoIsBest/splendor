@@ -1128,11 +1128,30 @@ console.log('OK  超时强制托管 · 退还筹码一次退完并结束回合')
   // 显式留一个机器人席位，才能验证「机器人回应」这条路径。
   page.state.players[1].isAI = true;
   page.ui.screen = 'game';
+  // 聊天面板有防误触窗口（切 tab / 进选目标后极短时间内不接收点选）。
+  // 用例里的连续调用是「零间隔连点」，必须先推进时间才等价于真人的两次点击。
+  const C2 = require(ROOT + '/utils/chat.js');
+  const realNowChat = Date.now;
+  let chatNow = realNowChat();
+  Date.now = function () { return chatNow; };
+  function dwell(ms) { chatNow += (ms || 0); }
+
   page.onToggleChatPanel();
   assert(page.data.chat.open === true, '应能打开快捷聊天面板');
   assert(page.data.chat.texts.length >= 8 && page.data.chat.emojis.length >= 8, '面板应带预设短语与表情');
   page.onSwitchChatTab({ currentTarget: { dataset: { tab: 'emoji' } } });
   assert(page.data.chat.isEmoji === true && page.data.chat.isText === false, '两个 tab 互斥切换');
+
+  // 防误触 ①：切完 tab 紧接着的那一下必须被拦下（真机上手指还没抬起）
+  const beforeLock = page.ui.chatMessages.length;
+  page.onSendQuickChat({ currentTarget: { dataset: { kind: 'emoji', id: 'e9' } } });
+  assert(page.ui.chatMessages.length === beforeLock && page.ui.chatPendingEmoji === null,
+    '切 tab 后的余波点击必须被防误触窗口拦下');
+  assert(page.data.chat.tabLocked === true, 'VM 应暴露切 tab 的防误触锁');
+  dwell(C2.TAB_DWELL_MS + 40);
+  page.refresh('');
+  assert(page.data.chat.tabLocked === false, '窗口过后锁应自动释放');
+
   // 表情改两步：选表情 → 选目标玩家 → 飞到目标头像上
   const beforeEmoji = page.ui.chatMessages.length;
   page.onSendQuickChat({ currentTarget: { dataset: { kind: 'emoji', id: 'e9' } } });
@@ -1140,6 +1159,14 @@ console.log('OK  超时强制托管 · 退还筹码一次退完并结束回合')
   assert(page.data.chat.open === true, '选目标时面板保持打开');
   assert(page.data.chat.targets.length === page.state.players.length, '目标列表覆盖全部席位');
   assert(page.ui.chatMessages.length === beforeEmoji, '未选目标前不得发出消息');
+
+  // 防误触 ②：连点两下表情时，第二下不得直接把表情投出去
+  page.onPickChatTarget({ currentTarget: { dataset: { seat: 1 } } });
+  assert(page.ui.chatMessages.length === beforeEmoji && page.data.chat.open === true,
+    '进入选目标后的余波点击不得把表情投出去');
+  assert(page.data.chat.targetLocked === true, 'VM 应暴露选目标的防误触锁');
+  dwell(C2.TARGET_DWELL_MS + 40);
+
   page.onPickChatTarget({ currentTarget: { dataset: { seat: 99 } } });
   assert(page.ui.chatMessages.length === beforeEmoji, '越界席位不得发送');
   const realPending = page.ui.chatPendingEmoji;
@@ -1150,6 +1177,8 @@ console.log('OK  超时强制托管 · 退还筹码一次退完并结束回合')
   page.onCancelChatTarget();
   assert(page.data.chat.isPick === true, '取消后回到选表情');
   page.onSendQuickChat({ currentTarget: { dataset: { kind: 'emoji', id: 'e9' } } });
+  // 重新选表情会重置选目标窗口，等它过期再点目标
+  dwell(C2.TARGET_DWELL_MS + 40);
   page.onPickChatTarget({ currentTarget: { dataset: { seat: 1 } } });
   assert(page.data.chat.open === false, '选定目标后面板应自动收起');
   assert(page.ui.chatMessages.length === beforeEmoji + 1, '定向表情应进入本机队列');
@@ -1194,8 +1223,11 @@ console.log('OK  超时强制托管 · 退还筹码一次退完并结束回合')
 
   page.onToggleChatPanel();
   assert(page.data.chat.open === true, '面板可再次打开');
+  // 打开面板同样算一次内容刷新，落点前的余波点击不该发出消息
+  dwell(C2.TAB_DWELL_MS + 40);
   page.onCloseChatPanel();
   assert(page.data.chat.open === false, '面板可关闭');
+  Date.now = realNowChat;
 }
 // 本段产生的气泡 TTL / 机器人回应 / 换手提醒定时器全部作废，
 // 避免后续「对手动作回放」用例 drain() 时被这些残留任务污染
@@ -2055,6 +2087,81 @@ console.log('OK  终局提示 · 指名达标者 / 剩余回合 / 结算后消�
 
             global.wx.showModal = origModal;
             console.log('OK  菜单重开 · 人机二次确认 / 发起门禁 / 同意否决 / 全员通过回大厅 / 换局失效');
+          }
+
+          /* ---------- 昵称敏感字：所有展示出口都必须脱敏 ----------
+             第四十六轮只覆盖了「榜单 + 席位 + me.nameText」三个出口，实际还有
+             一堆直接读 .nickname 的地方（大厅昵称、回合提示、结算标题、终局提示、
+             贵族等待、超时提示、踢人确认、邀请弹窗、分享卡片…）。逐处改完后，
+             用「整份视图模型 + 页面可见文案都不许出现敏感字」反过来锁死。 */
+          {
+            const Nick = require(ROOT + '/utils/nickname.js');
+            const RAW = '康师傅';
+            const MASKED = '*师傅';
+            assert(Nick.maskName(RAW) === MASKED, '前置：脱敏函数本身应命中');
+
+            // 造一局 2 人局：自己叫 RAW，对手也带敏感字
+            page.onStartSolo();
+            page.ui.screen = 'game';
+            page.profile.nickname = RAW;
+            page.state.players[0].nickname = RAW;
+            page.state.players[0].name = RAW;
+            page.state.players[1].nickname = '小康';
+            page.state.players[1].name = '小康';
+            page.mySeat = 0;
+            page.applySelfProfileToState();
+            page.refresh('');
+
+            // 1) 牌桌视图模型：除设置页输入框（按设计保留原字可编辑）外不得出现原字
+            const gameData = JSON.parse(JSON.stringify(page.data));
+            if (gameData.profileDialog) gameData.profileDialog.nickname = '';
+            const gameJson = JSON.stringify(gameData);
+            assert(gameJson.indexOf('康') < 0,
+              '牌桌视图模型不得残留敏感字，出现位置：' +
+              (gameJson.indexOf('康') >= 0 ? gameJson.slice(Math.max(0, gameJson.indexOf('康') - 60), gameJson.indexOf('康') + 40) : ''));
+
+            // 2) 大厅：自己的昵称也是公开展示位
+            page.ui.screen = 'home';
+            page.refresh('');
+            assert(page.data.home.nickname === MASKED, '大厅昵称应脱敏：' + page.data.home.nickname);
+            assert(page.data.home.initial === '*', '大厅头像首字应脱敏');
+
+            // 3) 房间大厅席位（自己的席位走 profile 分支，最容易漏）
+            page.ui.screen = 'room';
+            if (page.room) {
+              page.room.seats[0].nickname = RAW;
+              page.room.seats[0].name = RAW;
+            }
+            page.refresh('');
+            assert(JSON.stringify(page.data.roomScreen || {}).indexOf('康') < 0, '房间层不得残留敏感字');
+
+            // 4) 分享卡片 desc 也要脱敏（会直接显示给别人看）
+            const RS = require(ROOT + '/utils/room.js');
+            const share = RS.shareMessage({ code: '123456', playerCount: 2 }, { nickname: RAW });
+            assert(share.desc.indexOf('康') < 0, '分享卡片描述不得出现敏感字：' + share.desc);
+            assert(share.desc.indexOf(MASKED) >= 0, '分享卡片应显示脱敏后的昵称');
+
+            // 5) 设置页必须保留原字，否则用户没法编辑自己的昵称
+            page.ui.showProfile = true;
+            page.refresh('');
+            assert(page.data.profileDialog.nickname === RAW, '设置页输入框应保留原字可编辑');
+
+            // 6) 聊天：发送时脱敏，气泡也不得露出原字
+            page.ui.screen = 'game';
+            page.refresh('');
+            if (!page.ui.chatPanelOpen) page.onToggleChatPanel();
+            page.ui.chatTabSwitchAt = 0;
+            page.onSendQuickChat({ currentTarget: { dataset: { kind: 'text', id: 't1' } } });
+            const lastMsg = page.ui.chatMessages[page.ui.chatMessages.length - 1];
+            assert(lastMsg && lastMsg.name.indexOf('康') < 0, '聊天消息携带的昵称应脱敏：' + (lastMsg && lastMsg.name));
+            assert(JSON.stringify(page.data.chat).indexOf('康') < 0, '聊天视图模型不得残留敏感字');
+
+            // 还原，避免影响后续用例
+            page.profile.nickname = '珠宝商';
+            page.ui.showProfile = false;
+            page.ui.chatMessages = [];
+            page.refresh('');
+            console.log('OK  昵称脱敏 · 牌桌/大厅/房间/分享/聊天全出口覆盖，设置页保留原字');
           }
 
           page.onUnload();

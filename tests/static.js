@@ -117,6 +117,49 @@ else ok('WXML 标签闭合平衡');
   ok('H5 预览模块注册表覆盖新增 utils');
 })();
 
+// 3.3 昵称脱敏：展示层不得直接读 .nickname 拼进视图模型。
+// 第四十六轮只覆盖了 3 个出口，实测还漏了 8 处（大厅 / 回合提示 / 结算标题 /
+// 终局提示 / 贵族等待 / 对手卡 / 设置页首字 / 分享卡片）。逐处改完后，
+// 这里锁住「不许再出现裸读」，新增展示位时会被立刻拦下。
+(function () {
+  const pageSrc = read('pages/index/index.js');
+  // 允许的例外：写入 state / 上云 / 建好友关系时保留原值（展示层统一出口负责过滤）、
+  // 设置页输入框按设计显示原字、profileDraft 编辑态、注释行。
+  const allowed = [
+    /const src = \(p && \(p\.nickname \|\| p\.name\)\)/,   // displayName 本体
+    /nickname: draft\.nickname \|\| ''/,                    // 设置页输入框
+    /nickname: nickname,/,                                  // saveProfile 写入
+    /name: that\.profile\.nickname, nickname: that\.profile\.nickname/,  // 登录后写席位
+    /p\.nickname = that\.profile\.nickname/,                // 同上
+    /p\.name = that\.profile\.nickname/,                    // 同上
+    /me\.nickname = name;/,                                 // applySelfProfileToState
+    /seat\.nickname = name;/,                               // 同上
+    /const name = p\.nickname \|\| '珠宝商';/,               // 同上：写入 state 用原值，
+                                                            // 所有展示位在 VM 出口统一过滤
+    /L\.entryOf\(p\.uid, p\.nickname/,                      // 榜单上云：存原值，展示层过滤
+    /F\.addFriend\(me, found\.uid, found\.nickname\)/,       // 好友关系存原值，列表出口过滤
+    /^\s*\*/,                                               // 注释行
+    /profileDraft\.nickname/,                               // 编辑草稿
+    /const nickname = String\(d\.nickname/                  // 保存前清洗
+  ];
+  const bad = [];
+  pageSrc.split('\n').forEach(function (line, i) {
+    if (!/\.nickname\b/.test(line)) return;
+    if (allowed.some(function (re) { return re.test(line); })) return;
+    // 已经走 displayName / Nick.maskName 的行是安全的
+    if (/displayName\(|maskName\(/.test(line)) return;
+    bad.push((i + 1) + ': ' + line.trim().slice(0, 90));
+  });
+  if (bad.length) fail('展示层存在未脱敏的昵称直读（请改用 displayName()）:\n    ' + bad.join('\n    '));
+  else ok('昵称脱敏 · 展示层无裸读 .nickname');
+
+  // 分享卡片 desc 会直接展示给别人，也必须过滤
+  const roomSrc = read('utils/room.js');
+  if (!/desc: Nick\.maskName\(p\.nickname\)/.test(roomSrc)) {
+    fail('分享卡片 desc 未脱敏 —— 会把自己的敏感字昵称发给所有人');
+  } else ok('昵称脱敏 · 分享卡片 desc');
+})();
+
 // 4. 事件绑定必须存在对应 JS 方法
 const pageJs = read('pages/index/index.js');
 const handlers = new Set();
@@ -211,6 +254,49 @@ if (/over\s*<\s*12/.test(pageJs)) {
 } else {
   ok('超时立即代打 · 无 12 秒宽限 / 规则文案同步');
 }
+
+// 7.6 聊天面板防误触：三态（快捷语 / 表情 / 选目标）必须共用定高容器，
+// 否则切换瞬间面板骤缩骤长，手指还停在原位时新条目就长到指尖下，
+// 抬手误触到别的条目甚至下面的牌桌。
+(function () {
+  const wxss = read('pages/index/index.wxss');
+  if (!/\.chat-body\s*\{[^}]*height:\s*\d+px/.test(wxss)) {
+    fail('聊天面板缺少定高容器 .chat-body —— 三个 tab 高度不一致会导致切换误触');
+  } else if (!/animation:\s*chatPanelIn/.test(wxss) || /animation:\s*dialogIn/.test(wxss.split('.chat-panel {')[1].split('}')[0] || '')) {
+    fail('聊天面板不得再用带位移的 dialogIn —— 入场时元素自己还在移动，抬手会落到邻居上');
+  } else {
+    ok('聊天面板 · 定高容器 + 无位移入场');
+  }
+  const chatWxml = wxml;
+  const bodyOpen = chatWxml.indexOf('class="chat-body"');
+  if (bodyOpen < 0) {
+    fail('WXML 未使用 .chat-body 包裹三种面板状态');
+  } else {
+    // 三个状态的 wx:if 都必须在 .chat-body 之后、其闭合之前
+    const after = chatWxml.slice(bodyOpen);
+    const okAll = after.indexOf('chat-grid is-text') > 0 &&
+      after.indexOf('chat-grid is-emoji') > 0 &&
+      after.indexOf('chat-target"') > 0;
+    if (!okAll) fail('三态内容未全部放进 .chat-body');
+    else ok('聊天面板 · 三态共用定高容器');
+  }
+})();
+
+// 7.6.1 防误触时间戳必须同时被页面写入与 VM 消费，缺一边等于没锁
+(function () {
+  const pageSrc2 = read('pages/index/index.js');
+  const chatSrc = read('utils/chat.js');
+  if (!/tabSwitchAt:\s*ui\.chatTabSwitchAt/.test(pageSrc2) || !/pendingAt:\s*ui\.chatPendingAt/.test(pageSrc2)) {
+    fail('页面未把防误触时间戳传给 chatVM');
+  } else if (!/TAB_DWELL_MS/.test(chatSrc) || !/TARGET_DWELL_MS/.test(chatSrc)) {
+    fail('utils/chat.js 缺少防误触窗口常量');
+  } else if (!/Date\.now\(\) - \(this\.ui\.chatTabSwitchAt/.test(pageSrc2) ||
+             !/Date\.now\(\) - \(this\.ui\.chatPendingAt/.test(pageSrc2)) {
+    fail('页面事件未按防误触窗口短路 —— 常量定义了但没人用');
+  } else {
+    ok('聊天防误触 · 常量 / VM 判定 / 事件短路三处齐全');
+  }
+})();
 
 // 7.7 重开投票：弹层按钮必须 catchtap，且预览构建必须注册这个新模块
 // （__def 是立即执行，漏注册会在浏览器预览里直接报 module not found）。
