@@ -2446,6 +2446,44 @@ page, .viewport { width: 100vw; height: 100vh; overflow: hidden; }
   font-size: 10.5px; line-height: 1; color: #dcc39a; letter-spacing: 1px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, .8);
 }
+/* 大厅常驻模式选择：与在线条同列（x414~676），落在它下方 y≈150 的空白带。
+   复用首页模式目录数据，人机 / 建房 / 加入共用同一份 ui.lobbyMode。 */
+.guild-modes {
+  position: absolute; left: 414px; top: 151px; width: 262px; box-sizing: border-box;
+  padding: 9px 11px 11px; border-radius: 9px;
+  background: linear-gradient(180deg, rgba(46, 18, 26, .9), rgba(22, 8, 14, .86));
+  border: 1px solid rgba(220, 186, 113, .38);
+  box-shadow: inset 0 1px 0 rgba(255, 240, 200, .12), 0 2px 7px rgba(0, 0, 0, .45);
+}
+.guild-modes-head { display: flex; align-items: center; justify-content: center; }
+.guild-modes-title {
+  font-family: "Songti SC", Georgia, serif; font-size: 15px; font-weight: 700;
+  letter-spacing: 4px; color: #ffe3a0; text-shadow: 0 1px 3px rgba(0, 0, 0, .8);
+}
+.guild-modes-hint {
+  display: block; margin: 3px 0 8px; text-align: center;
+  font-size: 10px; line-height: 1.3; color: #d8bd93; min-height: 13px;
+}
+.guild-modes-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.guild-mode-chip {
+  position: relative; width: 115px; height: 46px; box-sizing: border-box;
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: center;
+  gap: 2px; padding: 4px 8px; border-radius: 7px;
+  border: 1px solid rgba(243, 212, 139, .28); background: rgba(20, 9, 14, .72);
+  transition: border-color 120ms ease, transform 120ms ease, background-color 120ms ease;
+}
+.guild-mode-chip.is-active { border: 2px solid #ffe2a0; padding: 3px 7px; background: #493023; }
+.guild-mode-chip.is-locked { opacity: .46; }
+.guild-mode-hover { transform: translateY(1px); }
+.guild-mode-name {
+  font-family: "Songti SC", Georgia, serif; font-size: 15px; font-weight: 700;
+  color: #fff0d0; line-height: 1.1; white-space: nowrap;
+}
+.guild-mode-tag { font-size: 9px; letter-spacing: 1px; color: #bca78c; }
+.guild-mode-chip.is-active .guild-mode-tag { color: #ffe2a0; }
+@media (prefers-reduced-motion: reduce) {
+  .guild-mode-chip { transition: none; }
+}
 .guild-panel {
   position: absolute; left: 682px; width: 384px; height: 386px; box-sizing: border-box;
   padding: 27px 24px 25px; display: flex; flex-direction: column; align-items: stretch;

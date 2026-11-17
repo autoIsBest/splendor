@@ -673,6 +673,21 @@
         <text class="guild-online-label">人在线</text>
       </view>
 
+      <!-- 对局模式常驻入口：进大厅即可切换，人机 / 建房共用同一份 ui.lobbyMode。
+           与「对局设置」弹层里的选择器同源，选中态与开局写入 state.mode 完全一致。 -->
+      <view class="guild-modes">
+        <view class="guild-modes-head"><text class="guild-modes-title">对局模式</text></view>
+        <text class="guild-modes-hint">{{home.modeHint}}</text>
+        <view class="guild-modes-grid">
+          <view wx:for="{{home.modes}}" wx:key="key"
+                class="guild-mode-chip {{item.active ? 'is-active' : ''}} {{item.available ? '' : 'is-locked'}}"
+                bindtap="onSelectMode" data-key="{{item.key}}" hover-class="guild-mode-hover">
+            <text class="guild-mode-name">{{item.name}}</text>
+            <text class="guild-mode-tag">{{item.tag}}</text>
+          </view>
+        </view>
+      </view>
+
       <view class="guild-panel" style="top:{{topRightTop > 82 ? topRightTop : 82}}px;">
         <text class="guild-panel-title">经典对局</text>
         <view class="guild-rule"><text>◇</text></view>

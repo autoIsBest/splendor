@@ -62,7 +62,9 @@ assert(a.page.data.screen === 'home', '默认应停在入口界面');
   assert((homeHtml.match(new RegExp('data-tap="' + handler + '"', 'g')) || []).length === 1,
     '大厅入口应保留且不重复：' + handler);
 });
-['mode-bar', '筹备中', 'lobby-stats', 'lobby-recent', '本机账号', 'count-chip', 'timer-chip', '<input', 'home-notice'].forEach(function (noise) {
+// 「筹备中」不再是首屏禁词：大厅常驻模式卡片会灰显轮抽 / 双人协作，
+// 与设置弹层口径一致（第五十九轮起）。仍禁止旧版 mode-bar 与配置表单噪声。
+['mode-bar', 'lobby-stats', 'lobby-recent', '本机账号', 'count-chip', 'timer-chip', '<input', 'home-notice'].forEach(function (noise) {
   assert(homeHtml.indexOf(noise) < 0, '首屏不应常驻说明或配置表单：' + noise);
 });
 a.page.setData({ topRightTop: 110 });
@@ -1060,6 +1062,26 @@ console.log('四主题入口 / 三套主题房间与牌桌 / 退房恢复 OK');
   assert(e.host.innerHTML.indexOf('data-seat=') > 0, '目标选择渲染席位按钮');
   p.onUnload();
   console.log('渲染层 · 娱乐模式（模式入口 / 增益 / 技能面板） OK');
+}
+
+// 大厅常驻模式入口：不打开任何弹层，首屏即可见并切换模式
+{
+  const e = run(1280, 720);
+  const p = e.page;
+  // 首屏默认在大厅，模式卡片应直接渲染，无需点「对局设置」
+  assert(p.ui.screen === 'home', '测试起点应在大厅');
+  assert(e.host.innerHTML.indexOf('guild-modes') > 0, '大厅首屏应常驻模式选择卡片');
+  assert(e.host.innerHTML.indexOf('对局模式') > 0, '常驻卡片应标注「对局模式」');
+  assert(e.host.innerHTML.indexOf('娱乐模式') > 0, '常驻卡片应列出娱乐模式');
+  // 直接在大厅点选娱乐模式，状态与开局同源
+  p.onSelectMode({ currentTarget: { dataset: { key: 'entertainment' } } });
+  assert(p.ui.lobbyMode === 'entertainment', '大厅常驻卡片可切换娱乐模式');
+  assert(e.host.innerHTML.indexOf('guild-mode-chip is-active') > 0, '选中态应渲染');
+  // 筹备中的模式给出提示但不切换
+  p.onSelectMode({ currentTarget: { dataset: { key: 'draft' } } });
+  assert(p.ui.lobbyMode === 'entertainment', '筹备中模式不可被选中');
+  p.onUnload();
+  console.log('渲染层 · 大厅常驻模式入口（首屏可见 / 直接切换 / 筹备门禁） OK');
 }
 
 console.log('\nALL PREVIEW TESTS PASSED');

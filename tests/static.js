@@ -347,6 +347,28 @@ ok('重开投票 · 弹层渲染 / catchtap 绑定 / 预览模块已注册');
   ok('娱乐模式 · 模式注册 / 引擎分支 / 守恒保护 / 事件与弹层齐全');
 })();
 
+// 7.10 大厅常驻模式入口：模式选择必须在首页主界面直接可见、可点，
+//      而不是只藏在「对局设置」弹层里。与弹层共用 onSelectMode / home.modes。
+(function () {
+  const wxml = read('pages/index/index.wxml');
+  const wxss = read('pages/index/index.wxss');
+  // 大厅主界面（screen === 'home'，非弹层）需有 guild-modes 常驻卡片
+  const homeBlock = wxml.slice(
+    wxml.indexOf("screen === 'home'"),
+    wxml.indexOf("screen === 'room'")
+  );
+  if (homeBlock.indexOf('guild-modes') < 0) {
+    fail('大厅主界面缺少常驻模式选择卡片 guild-modes');
+  }
+  if (homeBlock.indexOf('onSelectMode') < 0 || homeBlock.indexOf('home.modes') < 0) {
+    fail('大厅常驻模式卡片必须绑定 onSelectMode 并渲染 home.modes');
+  }
+  if (!/\.guild-modes\b/.test(wxss)) {
+    fail('index.wxss 缺少 .guild-modes 样式');
+  }
+  ok('大厅常驻模式入口 · 首屏可见 / 绑定 onSelectMode / 样式齐全');
+})();
+
 // 8. 本地引用检查（require 路径）
 const reqRe = /require\(['"]([^'"]+)['"]\)/g;
 let qm;
