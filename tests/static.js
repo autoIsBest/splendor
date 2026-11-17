@@ -369,6 +369,29 @@ ok('重开投票 · 弹层渲染 / catchtap 绑定 / 预览模块已注册');
   ok('大厅常驻模式入口 · 首屏可见 / 绑定 onSelectMode / 样式齐全');
 })();
 
+// 7.11 REMOTE_ART 开关：默认必须关闭（内联），且只在 HTTPS 基址下才允许生成外链。
+//      开关做错的后果是「H5 正常、真机全白」，所以把默认值与协议校验都锁住。
+(function () {
+  const artSrc = read('preview/art.js');
+  // 默认基址必须为空：保证不设环境变量时行为与历史完全一致（全内联）
+  if (!/const REMOTE_ART_BASE = '';/.test(artSrc)) {
+    fail('art.js 的 REMOTE_ART_BASE 默认值必须为空字符串（默认走内联）');
+  }
+  // 非 HTTPS 基址必须拒绝，避免 http 外链在真机被拦
+  if (!/\^https:\\\/\\\//.test(artSrc) && artSrc.indexOf('^https:\\/\\/') < 0) {
+    fail('art.js 缺少 REMOTE_ART 的 HTTPS 协议校验');
+  }
+  // 当前产物应当是内联的：一旦误提交远程产物，主包与真机都会出问题
+  const artWxss = read('pages/index/art.wxss');
+  if (/url\("https:\/\//.test(artWxss)) {
+    fail('art.wxss 含网络图片外链：REMOTE_ART 未正式启用前不应提交远程产物');
+  }
+  if (artWxss.indexOf('data:image/webp;base64,') < 0) {
+    fail('art.wxss 缺少内联 webp：默认模式应保持内联');
+  }
+  ok('美术资源 · REMOTE_ART 默认关闭 / HTTPS 校验 / 产物为内联');
+})();
+
 // 8. 本地引用检查（require 路径）
 const reqRe = /require\(['"]([^'"]+)['"]\)/g;
 let qm;

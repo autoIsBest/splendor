@@ -650,8 +650,53 @@ function coinFaceSVG(key) {
  * 生成器本身只做文件读取，不依赖本机装图像工具。
  * 找不到 webp 时回退原 jpeg，保证缺资源时仍能构建（只是体积回弹）。
  * 微信小程序基础库与 H5 均支持 data:image/webp;base64 的 background-image。
+ *
+ * ---------- REMOTE_ART 开关（第五十九轮） ----------
+ * 设为 CDN 基址（如 https://cdn.example.com/splendor）后，图片改为网络加载，
+ * 主包可从约 1705KB 降到约 1100KB。默认关闭（空串）走内联，行为与之前完全一致。
+ *
+ * 开启前必须满足（缺一不可，否则真机全白）：
+ *   1. 正式 AppID（touristappid 没有小程序后台，配不了服务器域名）；
+ *   2. 该域名已 ICP 备案、走 HTTPS；
+ *   3. 后台「开发设置-服务器域名」把域名加进 **downloadFile 合法域名**
+ *      （不是 request，两套白名单互相独立）；
+ *   4. 关掉开发者工具的「不校验合法域名」后真机仍能显示，才算真正通过。
+ *
+ * 环境变量：REMOTE_ART=<baseUrl> 或 REMOTE_ART=1（用内置默认基址）。
+ * 只给 URL、不内嵌兜底：图片加载失败时露出各元素自身的 background-color
+ * （.card-photo / .noble-photo 已设深色底色），不会白屏。
  */
+const REMOTE_ART_BASE = '';
+
+function remoteBase() {
+  const raw = String(process.env.REMOTE_ART || '').trim();
+  if (!raw || raw === '0') return '';
+  const base = raw === '1' ? REMOTE_ART_BASE : raw;
+  if (!base) {
+    console.error('FATAL REMOTE_ART 已开启但未提供基址：请设 REMOTE_ART=https://cdn.example.com/path，或在 art.js 里填 REMOTE_ART_BASE');
+    process.exit(1);
+  }
+  if (!/^https:\/\//i.test(base)) {
+    console.error('FATAL REMOTE_ART 基址必须是 https://（小程序真机只接受 HTTPS）：' + base);
+    process.exit(1);
+  }
+  return base.replace(/\/+$/, '');
+}
+
+/* 缩略图在 CDN 上的相对路径：thumbs/cards/c0_00.webp → cards/c0_00.webp。
+ * 与本地目录结构一一对应，上传时保持 thumbs/ 下的层级即可。 */
+function remoteUrl(file) {
+  const base = remoteBase();
+  if (!base) return '';
+  const webp = file.replace(/\.jpe?g$/i, '.webp');
+  const pick = fs.existsSync(webp) ? webp : file;
+  const rel = path.relative(path.join(__dirname, 'thumbs'), pick).split(path.sep).join('/');
+  return base + '/' + rel;
+}
+
 function imgBg(file) {
+  const remote = remoteUrl(file);
+  if (remote) return 'url("' + remote + '")';
   const webp = file.replace(/\.jpe?g$/i, '.webp');
   if (fs.existsSync(webp)) {
     return 'url("data:image/webp;base64,' + fs.readFileSync(webp).toString('base64') + '")';
