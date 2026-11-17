@@ -873,6 +873,18 @@ function lobbyVM(ui, profile) {
   const stats = U.statsOf();
   const identity = U.getIdentity();
   const activeMode = ui.lobbyMode || 'standard';
+  const modeStyles = {
+    standard: { tagline: '收集宝石，争夺声望', artClass: 'is-standard', gemClass: 'gem-green' },
+    entertainment: { tagline: '体验更多规则变化', artClass: 'is-entertainment', gemClass: 'gem-red' },
+    draft: { tagline: '轮抽组牌，筹备中', artClass: 'is-standard', gemClass: 'gem-blue' },
+    team: { tagline: '双人协作，筹备中', artClass: 'is-entertainment', gemClass: 'gem-white' }
+  };
+  const modes = U.listModes(activeMode).map(function (m) {
+    const style = modeStyles[m.key] || modeStyles.standard;
+    return Object.assign({}, m, style);
+  });
+  const activeModeVM = modes.filter(function (m) { return m.active; })[0] || modes[0];
+  const featuredModes = modes.filter(function (m) { return m.available; }).slice(0, 2);
   const timer = turnLimitVM(ui.turnLimit, false);
   const recent = U.recordList(4).map(function (r) {
     return {
@@ -901,7 +913,11 @@ function lobbyVM(ui, profile) {
     ],
     recent: recent,
     hasRecent: recent.length > 0,
-    modes: U.listModes(activeMode),
+    modes: modes,
+    featuredModes: featuredModes,
+    activeModeName: activeModeVM.name,
+    activeModeGem: activeModeVM.gemClass,
+    hasMoreModes: modes.length > featuredModes.length,
     modeHint: U.modeByKey(activeMode).desc,
     soloCount: solo,
     roomCount: room,
@@ -4830,8 +4846,14 @@ Page({
       return;
     }
     this.ui.lobbyMode = mode.key;
-    this.ui.homeNotice = mode.key === 'entertainment'
-      ? '娱乐模式：开局自选增益，局中可消耗回合使用技能' : '';
+    this.ui.homeNotice = '';
+    this.refresh('');
+  },
+
+  /** 更多玩法：未开放模式只做如实说明，不制造假入口 */
+  onOpenMoreModes() {
+    if (this.ui.screen !== 'home') return;
+    this.ui.homeNotice = '轮抽模式与双人协作正在筹备中，敬请期待';
     this.refresh('');
   },
 

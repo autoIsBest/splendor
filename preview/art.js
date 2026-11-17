@@ -738,7 +738,8 @@ function lobbyImage(name, fallback) {
   const file = path.join(lobbyDir, name);
   return fs.existsSync(file) ? imgBg(file) : bg(fallback());
 }
-lines.push('.guild-scenery, .theme-thumb-royal { background-image: ' + lobbyImage('scene.jpg', lobbyArt.sceneSVG) + '; }');
+lines.push('.guild-scenery, .guild-mode-scene, .theme-thumb-royal { background-image: ' + lobbyImage('scene.jpg', lobbyArt.sceneSVG) + '; }');
+lines.push('.guild-mode-scene.is-entertainment { background-image: ' + lobbyImage('entertainment.jpg', lobbyArt.sceneSVG) + '; }');
 lines.push('.guild-panel { background-image: ' + lobbyImage('panel.jpg', lobbyArt.panelSVG) + '; }');
 lines.push('.guild-avatar-preset { background-image: ' + lobbyImage('merchant.jpg', portraitSVG) + '; }');
 lines.push('.guild-quick { background-image: ' + bg(lobbyArt.buttonSVG('gold')) + '; }');

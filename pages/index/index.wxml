@@ -637,85 +637,117 @@
     </view>
     <!-- ========== /牌桌图层 ========== -->
 
-    <!-- ========== 商会大厅：装饰场景无烘焙 UI，所有文字与操作均为原生组件 ========== -->
+    <!-- ========== 商会大厅：珠宝橱窗式首屏，主操作与玩法选择分区 ========== -->
     <view wx:if="{{screen === 'home'}}" class="screen-layer home-screen">
       <view class="guild-scenery"></view>
       <view class="guild-scene-shade"></view>
 
-      <view class="guild-profile" bindtap="onOpenProfile" hover-class="guild-pressed">
-        <view class="guild-avatar-frame">
-          <view wx:if="{{home.avatarUrl}}" class="guild-avatar">
-            <image class="guild-avatar-img" src="{{home.avatarUrl}}" mode="aspectFill"></image>
-          </view>
-          <view wx:else class="guild-avatar"
-                style="background:radial-gradient(circle at 32% 24%, rgba(255,240,210,.55), {{home.avatarHue}} 52%, rgba(20,10,16,.92) 100%);">
-            <text class="guild-avatar-initial">{{home.initial}}</text>
-          </view>
+      <view class="guild-header">
+        <view class="guild-wordmark">
+          <view class="guild-brand-gem gem-icon gem-green"></view>
+          <text class="guild-brand-title">璀璨宝石</text>
         </view>
-        <view class="guild-player-text">
-          <text class="guild-player-name">{{home.nickname}}</text>
-          <text class="guild-player-rank">{{home.rankTitle}}</text>
+        <view class="guild-brand-divider"></view>
+        <text class="guild-brand-subtitle">商会大厅</text>
+
+        <!-- 在线人数仅在拿到真实心跳数据后显示数字，首屏不谎报 0。 -->
+        <view class="guild-online {{home.onlineReady ? 'is-ready' : 'is-pending'}}">
+          <view class="guild-online-dot"></view>
+          <text class="guild-online-num">{{home.onlineText}}</text>
+          <text class="guild-online-label">人在线</text>
+        </view>
+
+        <view class="guild-profile" bindtap="onOpenProfile" hover-class="guild-pressed">
+          <view class="guild-avatar-frame">
+            <view wx:if="{{home.avatarUrl}}" class="guild-avatar">
+              <image class="guild-avatar-img" src="{{home.avatarUrl}}" mode="aspectFill"></image>
+            </view>
+            <view wx:else class="guild-avatar"
+                  style="background:radial-gradient(circle at 32% 24%, rgba(255,240,210,.55), {{home.avatarHue}} 52%, rgba(20,10,16,.92) 100%);">
+              <text class="guild-avatar-initial">{{home.initial}}</text>
+            </view>
+          </view>
+          <view class="guild-player-text">
+            <text class="guild-player-name">{{home.nickname}}</text>
+            <text class="guild-player-rank">{{home.rankTitle}}</text>
+          </view>
+          <text class="guild-profile-arrow">›</text>
         </view>
       </view>
 
-      <view class="guild-brand">
-        <view class="guild-brand-gem gem-icon gem-green"></view>
-        <text class="guild-brand-title">璀璨宝石</text>
-        <view class="guild-brand-sub"><view class="guild-title-line"></view><text>商会大厅</text><view class="guild-title-line"></view></view>
-      </view>
-
-      <!-- 实时在线人数：挂在标题正下方（标题区 y3~120，此处 y≈124 起是空白带）。
-           数据来自 splendor_presence 心跳表，统计近 2 分钟内有心跳的客户端。
-           onlineReady=false 时显示「—」而不是 0：还没查到时不能谎报「没人在线」。 -->
-      <view class="guild-online {{home.onlineReady ? 'is-ready' : 'is-pending'}}">
-        <view class="guild-online-dot"></view>
-        <text class="guild-online-num">{{home.onlineText}}</text>
-        <text class="guild-online-label">人在线</text>
-      </view>
-
-      <!-- 对局模式常驻入口：进大厅即可切换，人机 / 建房共用同一份 ui.lobbyMode。
-           与「对局设置」弹层里的选择器同源，选中态与开局写入 state.mode 完全一致。 -->
+      <!-- 已开放玩法以大幅场景卡呈现；人机、建房共用一个模式状态。 -->
       <view class="guild-modes">
-        <view class="guild-modes-head"><text class="guild-modes-title">对局模式</text></view>
-        <text class="guild-modes-hint">{{home.modeHint}}</text>
+        <view class="guild-modes-head">
+          <text class="guild-modes-title">对局模式</text>
+          <view wx:if="{{home.hasMoreModes}}" class="guild-more" bindtap="onOpenMoreModes" hover-class="guild-more-hover">
+            <text>更多玩法</text>
+            <text class="guild-more-arrow">›</text>
+          </view>
+        </view>
         <view class="guild-modes-grid">
-          <view wx:for="{{home.modes}}" wx:key="key"
-                class="guild-mode-chip {{item.active ? 'is-active' : ''}} {{item.available ? '' : 'is-locked'}}"
+          <view wx:for="{{home.featuredModes}}" wx:key="key"
+                class="guild-mode-chip {{item.active ? 'is-active' : ''}}"
                 bindtap="onSelectMode" data-key="{{item.key}}" hover-class="guild-mode-hover">
-            <text class="guild-mode-name">{{item.name}}</text>
-            <text class="guild-mode-tag">{{item.tag}}</text>
+            <view class="guild-mode-art {{item.artClass}}">
+              <view class="guild-mode-scene {{item.artClass}}"></view>
+              <view class="guild-mode-art-shade"></view>
+              <view wx:if="{{item.active}}" class="guild-mode-check"><text>✓</text></view>
+            </view>
+            <view class="guild-mode-copy">
+              <text class="guild-mode-name">{{item.name}}</text>
+              <view class="guild-mode-ornament">
+                <view class="guild-mode-line"></view><text>◇</text><view class="guild-mode-line"></view>
+              </view>
+              <text class="guild-mode-tagline">{{item.tagline}}</text>
+            </view>
           </view>
         </view>
       </view>
 
-      <view class="guild-panel" style="top:{{topRightTop > 82 ? topRightTop : 82}}px;">
-        <text class="guild-panel-title">经典对局</text>
-        <view class="guild-rule"><text>◇</text></view>
-        <view class="guild-quick" bindtap="onQuickStart" hover-class="guild-pressed">
-          <view class="guild-quick-gem gem-icon gem-white"></view>
-          <view class="guild-quick-copy">
-            <text class="guild-quick-title">快速开始</text>
-            <text class="guild-quick-sub">人机对战 · 可选 2–4 人</text>
+      <view class="guild-panel" style="top:{{topRightTop > 74 ? topRightTop : 74}}px;">
+        <view class="guild-panel-head">
+          <view class="guild-detail-crest">
+            <view class="guild-detail-crest-inner gem-icon {{home.activeModeGem}}"></view>
           </view>
+          <view class="guild-panel-heading">
+            <text class="guild-panel-overline">经典对局</text>
+            <text class="guild-panel-title">{{home.activeModeName}}</text>
+          </view>
+        </view>
+        <view class="guild-detail-rule"><view class="guild-detail-line"></view><text>◇</text><view class="guild-detail-line"></view></view>
+        <text class="guild-panel-subtitle">{{home.modeHint}}</text>
+        <view class="guild-config-row">
+          <text class="guild-config-label">对局人数</text>
+          <view class="guild-count-pick">
+            <view wx:for="{{home.soloCounts}}" wx:key="n"
+                  class="guild-count-option {{item.active ? 'is-active' : ''}}"
+                  bindtap="onSelectSoloCount" data-n="{{item.n}}">
+              <text>{{item.label}}</text>
+            </view>
+          </view>
+        </view>
+        <view class="guild-quick" bindtap="onQuickStart" hover-class="guild-quick-pressed">
+          <view class="guild-quick-copy">
+            <text class="guild-quick-title">开始人机对局</text>
+            <text class="guild-quick-sub">快速开始 · 人机对战 · 可选 2–4 人</text>
+          </view>
+          <view class="guild-quick-arrow"><text>→</text></view>
         </view>
         <view class="guild-room-actions">
-          <view class="guild-action" bindtap="onOpenHomeDialog" data-kind="create" hover-class="guild-pressed">
+          <view class="guild-action" bindtap="onOpenHomeDialog" data-kind="create" hover-class="guild-action-pressed">
             <view class="guild-icon guild-icon-table"></view>
             <text>创建房间</text>
           </view>
-          <view class="guild-action" bindtap="onOpenHomeDialog" data-kind="join" hover-class="guild-pressed">
+          <view class="guild-action" bindtap="onOpenHomeDialog" data-kind="join" hover-class="guild-action-pressed">
             <view class="guild-icon guild-icon-door"></view>
             <text>加入房间</text>
           </view>
         </view>
-        <view class="guild-panel-foot"><view class="guild-rule"><text>◇</text></view><text>2–4 人 · 策略对弈</text></view>
       </view>
 
       <text wx:if="{{home.notice && !home.dialog}}" class="guild-notice">{{home.notice}}</text>
       <view class="guild-nav">
         <view class="guild-nav-item" bindtap="onOpenFriends" hover-class="guild-nav-hover">
-          <!-- 好友图标用字符而不是新烘焙一张 SVG：图标集中在 art.wxss 由构建生成，
-               临时加一个图标会让「图标源」和「样式文件」两处不同步。 -->
           <view class="guild-icon guild-icon-text">⚭</view>
           <text>好友</text>
           <view wx:if="{{friendsPanel.onlineCount > 0}}" class="guild-nav-badge">{{friendsPanel.onlineCount}}</view>

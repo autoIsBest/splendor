@@ -2351,195 +2351,262 @@ page, .viewport { width: 100vw; height: 100vh; overflow: hidden; }
   box-sizing: border-box; z-index: 12;
 }
 
-/* 场景式大厅：真实陈列美术 / 独立可动金框板 / 原生交互，绝不烘焙操作文字。 */
-.home-screen { background: #260d16; }
+/* 对局大厅：深绿珠宝沙龙 + 大幅模式场景卡 + 右侧开局控制台。 */
+.home-screen {
+  overflow: hidden;
+  color: #f2efe2;
+  background: #07130f;
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", sans-serif;
+}
 .guild-scenery {
   position: absolute; left: 0; top: 0; width: 1080px; height: 560px;
   background-size: 100% 100%; background-repeat: no-repeat;
+  filter: saturate(.58) contrast(1.05) blur(1.2px);
+  transform: scale(1.02);
 }
 .guild-scene-shade {
   position: absolute; left: 0; top: 0; right: 0; bottom: 0; pointer-events: none;
-  background: linear-gradient(180deg, rgba(26, 6, 12, .08), transparent 30%, transparent 78%, rgba(16, 6, 8, .28));
-  box-shadow: inset 0 0 22px rgba(24, 8, 10, .35);
+  background:
+    linear-gradient(180deg, rgba(4, 15, 11, .24) 0%, rgba(4, 15, 11, .48) 24%, rgba(5, 17, 12, .92) 100%),
+    linear-gradient(90deg, rgba(5, 15, 12, .45), transparent 38%, rgba(5, 15, 12, .62));
 }
+.guild-header {
+  position: absolute; left: max(26px, env(safe-area-inset-left)); right: max(26px, env(safe-area-inset-right)); top: 10px;
+  height: 44px; display: flex; align-items: center;
+}
+.guild-wordmark { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.guild-brand-gem { width: 25px; height: 25px; filter: drop-shadow(0 3px 5px rgba(2, 12, 9, .45)); }
+.guild-brand-title {
+  font-family: "Songti SC", "STSong", serif; font-size: 27px; font-weight: 700;
+  line-height: 1; letter-spacing: 4px; color: #f4f1e2;
+}
+.guild-brand-divider { width: 1px; height: 22px; margin: 0 14px; background: rgba(219, 229, 211, .3); }
+.guild-brand-subtitle { font-family: "Songti SC", "STSong", serif; font-size: 13px; letter-spacing: 2px; color: #d8d5c5; }
+.guild-online {
+  height: 28px; margin-left: 20px; padding: 0 10px; box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  border: 1px solid rgba(199, 222, 209, .12); border-radius: 14px;
+  background: rgba(7, 23, 17, .64);
+}
+.guild-online-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+  background: #77c4a3; box-shadow: 0 0 0 3px rgba(119, 196, 163, .1);
+  animation: onlinePulse 2s ease-in-out infinite;
+}
+.guild-online.is-pending .guild-online-dot { background: #75837e; box-shadow: none; animation: none; }
+@keyframes onlinePulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .55; transform: scale(.82); }
+}
+.guild-online-num {
+  min-width: 11px; text-align: right; font-size: 11px; font-weight: 700; line-height: 1;
+  color: #dfeae2; font-variant-numeric: tabular-nums;
+}
+.guild-online.is-pending .guild-online-num { color: #9ba9a3; }
+.guild-online-label { font-size: 9px; line-height: 1; color: #a7b7b0; }
 .guild-profile {
-  position: absolute; left: 13px; top: 9px; width: 260px; height: 82px;
-  display: flex; align-items: center; gap: 10px; box-sizing: border-box; padding-right: 18px;
-  background: linear-gradient(90deg, #28171a 0%, rgba(41, 23, 23, .98) 84%, rgba(41, 23, 23, .78) 100%);
-  border-radius: 44px 7px 7px 44px; border: 1px solid rgba(246, 215, 151, .7);
-  box-shadow: 0 3px 10px rgba(28, 11, 8, .5), inset 0 0 0 2px rgba(208, 159, 75, .18);
+  min-width: 188px; height: 46px; margin-left: auto; margin-right: 124px; padding: 4px 10px 4px 4px;
+  display: flex; align-items: center; gap: 9px; box-sizing: border-box;
+  border: 1px solid rgba(211, 229, 218, .18); border-radius: 11px;
+  background: rgba(8, 27, 20, .82);
+  box-shadow: inset 0 1px 0 rgba(238, 247, 240, .05);
+  transition: transform 120ms ease, background-color 120ms ease;
 }
 .guild-avatar-frame {
-  width: 80px; height: 80px; flex-shrink: 0; border-radius: 50%; padding: 4px; box-sizing: border-box;
-  background: linear-gradient(135deg, #fff0c2 0%, #c3903c 32%, #674013 50%, #edcf88 77%, #a87829 100%);
-  box-shadow: 0 0 0 1px #fff0be, inset 0 0 0 2px #5b3414, 0 3px 8px rgba(0, 0, 0, .65);
+  width: 38px; height: 38px; flex-shrink: 0; padding: 2px; box-sizing: border-box;
+  border: 1px solid rgba(212, 177, 119, .56); border-radius: 7px;
+  background: rgba(196, 155, 93, .1);
 }
 .guild-avatar {
-  width: 100%; height: 100%; border-radius: 50%; overflow: hidden; background-size: cover; background-position: center;
+  width: 100%; height: 100%; border-radius: 5px; overflow: hidden;
+  background-size: cover; background-position: center;
   display: flex; align-items: center; justify-content: center;
 }
 .guild-avatar-img { width: 100%; height: 100%; }
-.guild-avatar-initial {
-  font-family: "Songti SC", "STSong", Georgia, serif;
-  font-size: 30px; font-weight: 700; color: #fff6df;
-  text-shadow: 0 2px 6px rgba(0, 0, 0, .85);
-}
-.guild-player-text { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; }
+.guild-avatar-initial { font-size: 17px; font-weight: 700; color: #f4f6ef; text-shadow: 0 2px 5px rgba(4, 12, 10, .7); }
+.guild-player-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
 .guild-player-name {
-  font-family: "Songti SC", "STSong", Georgia, serif; font-size: 22px; font-weight: 700;
-  color: #ffe3a2; text-shadow: 0 2px 3px #20100a;
+  max-width: 103px; font-size: 13px; font-weight: 650; line-height: 1.1; color: #f1eee0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.guild-player-rank { font-size: 11px; letter-spacing: 2px; color: #d7b97f; }
-.guild-brand {
-  position: absolute; left: 414px; top: 3px; width: 262px; height: 117px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  background: radial-gradient(ellipse at center, rgba(52, 8, 22, .8), rgba(52, 8, 22, .2) 60%, transparent 75%);
-}
-.guild-brand-gem { width: 30px; height: 25px; filter: drop-shadow(0 2px 2px #0a1d16); }
-.guild-brand-title {
-  font-family: "Songti SC", "STSong", "Noto Serif CJK SC", Georgia, serif;
-  font-size: 46px; font-weight: 700; letter-spacing: 5px; line-height: 1.2;
-  color: #ffe3a0; text-shadow: 0 2px 0 #7e4c18, 0 4px 5px #1c0809;
-}
-.guild-brand-sub { display: flex; align-items: center; justify-content: center; gap: 13px; margin-top: 3px; }
-.guild-brand-sub text { font-family: "Songti SC", Georgia, serif; font-size: 18px; letter-spacing: 5px; color: #f6d18a; }
-.guild-title-line { width: 38px; height: 1px; background: linear-gradient(90deg, transparent, #dcba71, transparent); }
-/* 实时在线人数：标题正下方那一条空白带（y≈124 起，左侧身份卡底边 91、
-   右侧操作面板从 x682 开始，所以这条只能落在 x≈300~660 之间）。
-   与标题同一套古金色系，但刻意压低字号与亮度 —— 它是氛围信息，不该抢「快速开始」的视线。 */
-.guild-online {
-  position: absolute; left: 414px; top: 122px; width: 262px; height: 22px;
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-  box-sizing: border-box;
-  border-radius: 11px;
-  /* 底板要压过大厅场景图：原来 .55 透明度叠在深色帷幔上几乎看不出边界，
-     看起来像一行裸字浮在场景里。加深到 .78 并补一圈内描边。 */
-  background: linear-gradient(180deg, rgba(46, 18, 26, .92), rgba(22, 8, 14, .88));
-  border: 1px solid rgba(220, 186, 113, .45);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 240, 200, .16),
-    0 2px 6px rgba(0, 0, 0, .5);
-}
-/* 呼吸绿点：只有拿到真实数字才跳，未就绪时是静态暗点，避免「还在转圈」的错觉 */
-.guild-online-dot {
-  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
-  background: #4fd08a;
-  box-shadow: 0 0 6px rgba(79, 208, 138, .8);
-  animation: onlinePulse 2s ease-in-out infinite;
-}
-.guild-online.is-pending .guild-online-dot {
-  background: #8a7562; box-shadow: none; animation: none;
-}
-@keyframes onlinePulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: .5; transform: scale(.82); }
-}
-.guild-online-num {
-  font-family: Georgia, "Songti SC", serif;
-  font-size: 15px; font-weight: 700; line-height: 1;
-  color: #ffe3a0; text-shadow: 0 1px 3px rgba(0, 0, 0, .85);
-  min-width: 12px; text-align: right;
-}
-.guild-online.is-pending .guild-online-num { color: #c9ae88; }
-.guild-online-label {
-  font-size: 10.5px; line-height: 1; color: #dcc39a; letter-spacing: 1px;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, .8);
-}
-/* 大厅常驻模式选择：与在线条同列（x414~676），落在它下方 y≈150 的空白带。
-   复用首页模式目录数据，人机 / 建房 / 加入共用同一份 ui.lobbyMode。 */
+.guild-player-rank { font-size: 8px; letter-spacing: .7px; color: #b9b29c; }
+.guild-profile-arrow { margin-left: 2px; font-size: 22px; font-weight: 300; line-height: 1; color: #d8d0b9; }
+.guild-pressed { transform: scale(.98); background: rgba(25, 55, 39, .92); }
+
 .guild-modes {
-  position: absolute; left: 414px; top: 151px; width: 262px; box-sizing: border-box;
-  padding: 9px 11px 11px; border-radius: 9px;
-  background: linear-gradient(180deg, rgba(46, 18, 26, .9), rgba(22, 8, 14, .86));
-  border: 1px solid rgba(220, 186, 113, .38);
-  box-shadow: inset 0 1px 0 rgba(255, 240, 200, .12), 0 2px 7px rgba(0, 0, 0, .45);
+  position: absolute; left: max(16px, env(safe-area-inset-left)); right: 406px; top: 64px; height: 400px;
+  padding: 15px 18px 17px; box-sizing: border-box; border-radius: 18px;
+  border: 1px solid rgba(166, 190, 175, .28); background: linear-gradient(155deg, rgba(11, 35, 24, .96), rgba(6, 22, 16, .98));
+  box-shadow: inset 0 1px 0 rgba(239, 245, 233, .05), 0 12px 34px rgba(2, 10, 7, .24);
+  animation: guildEnter 360ms ease-out both;
 }
-.guild-modes-head { display: flex; align-items: center; justify-content: center; }
+.guild-modes-head { height: 30px; display: flex; align-items: center; justify-content: space-between; }
 .guild-modes-title {
-  font-family: "Songti SC", Georgia, serif; font-size: 15px; font-weight: 700;
-  letter-spacing: 4px; color: #ffe3a0; text-shadow: 0 1px 3px rgba(0, 0, 0, .8);
+  font-family: "Songti SC", "STSong", serif; font-size: 25px; font-weight: 700;
+  letter-spacing: 1px; line-height: 1; color: #f6f1dc;
 }
-.guild-modes-hint {
-  display: block; margin: 3px 0 8px; text-align: center;
-  font-size: 10px; line-height: 1.3; color: #d8bd93; min-height: 13px;
-}
-.guild-modes-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.guild-more { display: flex; align-items: center; gap: 4px; padding: 8px 0 8px 12px; font-size: 9px; color: #c8c0a8; }
+.guild-more-arrow { font-size: 15px; line-height: 1; color: #d9b979; }
+.guild-more-hover { opacity: .7; }
+.guild-modes-grid { display: flex; gap: 14px; height: 338px; margin-top: 12px; }
 .guild-mode-chip {
-  position: relative; width: 115px; height: 46px; box-sizing: border-box;
-  display: flex; flex-direction: column; align-items: flex-start; justify-content: center;
-  gap: 2px; padding: 4px 8px; border-radius: 7px;
-  border: 1px solid rgba(243, 212, 139, .28); background: rgba(20, 9, 14, .72);
-  transition: border-color 120ms ease, transform 120ms ease, background-color 120ms ease;
+  position: relative; flex: 1 1 0; min-width: 0; height: 100%; box-sizing: border-box;
+  display: flex; flex-direction: column; overflow: hidden;
+  border: 1px solid rgba(181, 158, 111, .66); border-radius: 14px;
+  background: linear-gradient(180deg, #123326, #0a2117);
+  box-shadow: 0 8px 20px rgba(2, 12, 8, .2);
+  transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
 }
-.guild-mode-chip.is-active { border: 2px solid #ffe2a0; padding: 3px 7px; background: #493023; }
-.guild-mode-chip.is-locked { opacity: .46; }
-.guild-mode-hover { transform: translateY(1px); }
+.guild-mode-chip.is-active {
+  border-color: #b8e6ca;
+  box-shadow: 0 0 0 2px rgba(174, 226, 197, .66), 0 10px 24px rgba(2, 12, 8, .25);
+}
+.guild-mode-hover { transform: translateY(-1px); }
+.guild-mode-art { position: relative; width: 100%; height: 194px; flex-shrink: 0; overflow: hidden; background: #10251e; }
+.guild-mode-scene {
+  position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+  background-repeat: no-repeat;
+}
+.guild-mode-scene.is-standard { background-size: 262% auto; background-position: 15% 26%; }
+.guild-mode-scene.is-entertainment { background-size: 100% auto; background-position: 50% 58%; }
+.guild-mode-art-shade {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 52px;
+  background: linear-gradient(0deg, #0d291e, rgba(13, 41, 30, 0));
+}
+.guild-mode-check {
+  position: absolute; right: 10px; top: 10px; width: 31px; height: 31px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: #c7ead4; border: 1px solid #edf7ea;
+  box-shadow: 0 3px 8px rgba(3, 16, 10, .3);
+}
+.guild-mode-check text { margin-top: -1px; font-size: 20px; font-weight: 700; line-height: 1; color: #1b3f2c; }
+.guild-mode-copy {
+  flex: 1; min-height: 0; padding: 12px 12px 13px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
 .guild-mode-name {
-  font-family: "Songti SC", Georgia, serif; font-size: 15px; font-weight: 700;
-  color: #fff0d0; line-height: 1.1; white-space: nowrap;
+  font-family: "Songti SC", "STSong", serif; font-size: 24px; font-weight: 700;
+  line-height: 1.1; letter-spacing: 1px; color: #faf2df;
 }
-.guild-mode-tag { font-size: 9px; letter-spacing: 1px; color: #bca78c; }
-.guild-mode-chip.is-active .guild-mode-tag { color: #ffe2a0; }
-@media (prefers-reduced-motion: reduce) {
-  .guild-mode-chip { transition: none; }
-}
+.guild-mode-ornament { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; margin: 7px 0 6px; }
+.guild-mode-ornament text { font-size: 9px; line-height: 1; color: #d5b16d; }
+.guild-mode-line { width: 44px; height: 1px; background: linear-gradient(90deg, transparent, rgba(211, 177, 111, .72)); }
+.guild-mode-ornament .guild-mode-line:last-child { background: linear-gradient(90deg, rgba(211, 177, 111, .72), transparent); }
+.guild-mode-tagline { font-size: 10px; line-height: 1.2; color: #c8c4b1; }
+
 .guild-panel {
-  position: absolute; left: 682px; width: 384px; height: 386px; box-sizing: border-box;
-  padding: 27px 24px 25px; display: flex; flex-direction: column; align-items: stretch;
-  background-size: 100% 100%; background-repeat: no-repeat;
-  filter: drop-shadow(0 8px 12px rgba(0, 0, 0, .42));
+  position: absolute; right: max(16px, env(safe-area-inset-right)); width: 364px; height: 388px; padding: 18px 20px;
+  box-sizing: border-box; display: flex; flex-direction: column;
+  border: 1px solid rgba(171, 195, 180, .34); border-radius: 18px;
+  background: linear-gradient(160deg, rgba(12, 37, 26, .98), rgba(7, 23, 17, .99));
+  box-shadow: 0 16px 38px rgba(2, 10, 7, .28), inset 0 1px 0 rgba(239, 245, 233, .06);
+  animation: guildEnter 380ms 70ms ease-out both;
 }
+.guild-panel-head { display: flex; align-items: center; gap: 12px; }
+.guild-detail-crest {
+  width: 54px; height: 54px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  border: 1px solid rgba(207, 176, 111, .66); border-radius: 50%;
+  background: radial-gradient(circle at 50% 38%, rgba(64, 99, 78, .9), rgba(8, 26, 18, .96) 72%);
+  box-shadow: inset 0 0 0 3px rgba(5, 19, 13, .7), 0 3px 9px rgba(2, 12, 7, .28);
+}
+.guild-detail-crest-inner { width: 42px; height: 36px; filter: drop-shadow(0 2px 3px rgba(2, 9, 6, .55)); }
+.guild-panel-heading { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.guild-panel-overline { font-size: 8px; letter-spacing: 2.4px; color: #b2ad97; }
 .guild-panel-title {
-  font-family: "Songti SC", "STSong", Georgia, serif; font-size: 36px; font-weight: 700;
-  line-height: 1.25; letter-spacing: 7px; text-align: center;
-  color: #ffe6a6; text-shadow: 0 2px 1px #765323, 0 4px 5px #021d1b;
+  font-family: "Songti SC", "STSong", serif; font-size: 28px; font-weight: 700;
+  line-height: 1.05; letter-spacing: 1px; color: #f8f1de;
 }
-.guild-rule { display: flex; align-items: center; justify-content: center; height: 14px; gap: 8px; margin-top: 8px; }
-.guild-rule::before, .guild-rule::after {
-  content: ''; display: block; height: 1px; flex: 1;
-  background: linear-gradient(90deg, transparent, #d9b66c, transparent);
+.guild-detail-rule { display: flex; align-items: center; gap: 8px; margin: 10px 0 8px; }
+.guild-detail-rule text { font-size: 9px; line-height: 1; color: #d0ad6c; }
+.guild-detail-line { flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgba(180, 196, 178, .3), transparent); }
+.guild-panel-subtitle { min-height: 26px; font-size: 9.5px; line-height: 1.35; color: #aeb9ab; }
+.guild-config-row { display: flex; align-items: center; gap: 12px; margin-top: 11px; }
+.guild-config-label { flex-shrink: 0; font-size: 11px; letter-spacing: .5px; color: #d5d1bd; }
+.guild-count-pick {
+  flex: 1; min-width: 0; height: 44px; padding: 3px; box-sizing: border-box;
+  display: flex; align-items: stretch; gap: 3px;
+  border: 1px solid rgba(190, 203, 191, .28); border-radius: 9px; background: rgba(5, 20, 13, .42);
 }
-.guild-rule text { font-size: 17px; line-height: 14px; color: #e5c67e; }
+.guild-count-option {
+  flex: 1; min-width: 0; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; color: #c8cdc0;
+}
+.guild-count-option.is-active {
+  color: #14301f; font-weight: 700;
+  background: linear-gradient(180deg, #d9f1df, #b7dec7);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .56);
+}
 .guild-quick {
-  display: flex; align-items: center; justify-content: center; gap: 15px;
-  min-height: 94px; flex-shrink: 0; margin-top: 12px; padding: 10px; box-sizing: border-box;
-  background-color: transparent; background-size: 100% 100%; background-repeat: no-repeat;
-  filter: drop-shadow(0 4px 4px rgba(0, 0, 0, .35));
+  height: 82px; margin-top: 18px; padding: 12px 14px 12px 20px; box-sizing: border-box;
+  display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+  border: 1px solid rgba(237, 246, 238, .56); border-radius: 11px;
+  background: linear-gradient(135deg, #d8efdc, #b9dac4);
+  box-shadow: 0 7px 18px rgba(3, 13, 10, .22), inset 0 1px 0 rgba(255, 255, 255, .62);
+  transition: transform 120ms ease, box-shadow 120ms ease;
 }
-.guild-quick-gem { width: 42px; height: 42px; filter: drop-shadow(0 3px 2px rgba(81, 47, 8, .7)); }
-.guild-quick-copy { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.guild-quick-copy { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
 .guild-quick-title {
-  font-family: "Songti SC", "STSong", Georgia, serif; font-size: 36px; font-weight: 700;
-  line-height: 1.1; letter-spacing: 3px; color: #3a1b06; text-shadow: 0 1px 0 #ffe6a5;
+  font-family: "Songti SC", "STSong", serif; font-size: 24px; font-weight: 700;
+  line-height: 1; letter-spacing: .5px; color: #0d2b1b;
 }
-.guild-quick-sub { font-size: 11px; line-height: 14px; letter-spacing: 2px; color: #69400f; }
-.guild-room-actions { display: flex; gap: 13px; margin-top: 20px; }
+.guild-quick-sub { font-size: 8.5px; line-height: 1; letter-spacing: .2px; color: #3b5f48; white-space: nowrap; }
+.guild-quick-arrow {
+  width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: #193b28; color: #e7f0e7; box-shadow: 0 3px 8px rgba(20, 49, 36, .2);
+}
+.guild-quick-arrow text { margin-top: -2px; font-size: 23px; font-weight: 400; line-height: 1; }
+.guild-quick-pressed { transform: scale(.985); box-shadow: 0 3px 9px rgba(3, 13, 10, .2); }
+.guild-room-actions { display: flex; gap: 10px; margin-top: 10px; }
 .guild-action {
-  flex: 1; min-width: 0; height: 84px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-  background-color: transparent; background-size: 100% 100%; background-repeat: no-repeat;
-  filter: drop-shadow(0 3px 3px rgba(0, 0, 0, .4));
+  flex: 1; min-width: 0; height: 58px; padding: 0 10px; box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  border: 1px solid rgba(198, 209, 197, .29); border-radius: 10px;
+  background: rgba(20, 45, 31, .54);
+  transition: transform 120ms ease, background-color 120ms ease;
 }
-.guild-action .guild-icon { width: 26px; height: 26px; }
-.guild-action text { font-family: "Songti SC", Georgia, serif; font-size: 20px; font-weight: 700; line-height: 1.2; color: #ffe1a0; text-shadow: 0 2px 2px #270b0e; }
-.guild-icon { width: 31px; height: 31px; flex-shrink: 0; background-size: 100% 100%; background-repeat: no-repeat; }
-.guild-panel-foot { margin-top: auto; text-align: center; }
-.guild-panel-foot > text { font-family: "Songti SC", Georgia, serif; display: block; font-size: 17px; font-weight: 600; letter-spacing: 2px; margin-top: 5px; color: #f2d899; }
-.guild-panel-foot .guild-rule { margin-top: 8px; }
-.guild-pressed { opacity: .85; }
+.guild-action .guild-icon { width: 23px; height: 23px; opacity: .9; }
+.guild-action text { font-size: 12px; font-weight: 550; line-height: 1.2; color: #e4e5d8; white-space: nowrap; }
+.guild-action-pressed { transform: translateY(1px); background: rgba(119, 196, 163, .12); }
+.guild-icon { width: 28px; height: 28px; flex-shrink: 0; background-size: 100% 100%; background-repeat: no-repeat; }
+
 .guild-nav {
-  position: absolute; left: 0; right: 0; bottom: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); height: 49px;
-  display: flex; align-items: center; border-top: 1px solid rgba(222, 184, 111, .5); border-bottom: 1px solid rgba(222, 184, 111, .35);
-  background: linear-gradient(180deg, rgba(35, 22, 17, .95), rgba(13, 9, 9, .94));
-  box-shadow: 0 -1px 12px rgba(19, 8, 7, .3);
+  position: absolute; left: max(16px, env(safe-area-inset-left)); right: max(16px, env(safe-area-inset-right));
+  bottom: calc(12px + env(safe-area-inset-bottom)); height: 74px; padding: 5px 8px; box-sizing: border-box;
+  display: flex; align-items: center; border: 1px solid rgba(168, 190, 175, .28); border-radius: 16px;
+  background: linear-gradient(180deg, rgba(10, 30, 21, .97), rgba(6, 20, 14, .98));
+  box-shadow: 0 -8px 28px rgba(4, 12, 10, .18), inset 0 1px 0 rgba(238, 245, 235, .04);
 }
-.guild-nav-item { position: relative; flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; gap: 13px; }
-.guild-nav-item + .guild-nav-item::before { content: ''; position: absolute; left: 0; top: 13px; bottom: 13px; width: 1px; background: linear-gradient(180deg, transparent, #bb914e, transparent); }
-.guild-nav-item text { font-family: "Songti SC", Georgia, serif; font-size: 21px; color: #f3d598; text-shadow: 0 2px 3px #000; }
-.guild-nav-hover { background: rgba(240, 195, 113, .1); }
+.guild-nav-item {
+  position: relative; flex: 1; min-width: 0; height: 64px; border-radius: 11px;
+  display: flex; align-items: center; justify-content: center; gap: 9px;
+  transition: background-color 120ms ease, transform 120ms ease;
+}
+.guild-nav-item + .guild-nav-item::before {
+  content: ''; position: absolute; left: -4px; top: 14px; bottom: 14px; width: 1px;
+  background: rgba(188, 201, 187, .15);
+}
+.guild-nav-item .guild-icon { width: 23px; height: 23px; opacity: .9; }
+.guild-nav-item text { font-family: "Songti SC", "STSong", serif; font-size: 13px; font-weight: 600; color: #e2ddc7; white-space: nowrap; }
+.guild-nav-hover { background: rgba(119, 196, 163, .1); transform: translateY(1px); }
+.guild-nav .guild-icon-text { color: #d6b676; text-shadow: none; }
+.guild-nav .guild-nav-badge {
+  right: calc(50% - 38px); top: 5px; min-width: 15px; height: 15px; padding: 0 4px;
+  color: #10251b; background: #9fd3b8; border: 1px solid #c5e3d1; box-shadow: none;
+  font-size: 9px;
+}
 .guild-notice {
-  position: absolute; left: 425px; right: 25px; bottom: 66px; padding: 5px 10px; border-radius: 5px;
-  background: rgba(25, 12, 12, .88); color: #ffe4b8; font-size: 11px; line-height: 16px; text-align: center;
+  position: absolute; left: 50%; bottom: 94px; max-width: 540px; padding: 9px 16px; box-sizing: border-box;
+  transform: translateX(-50%); border: 1px solid rgba(177, 213, 193, .24); border-radius: 18px;
+  background: rgba(17, 38, 31, .96); color: #e1ebe3; font-size: 11px; line-height: 16px; text-align: center;
+  box-shadow: 0 7px 20px rgba(3, 12, 9, .24); pointer-events: none; z-index: 4;
+}
+@keyframes guildEnter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .guild-modes, .guild-panel, .guild-online-dot { animation: none; }
+  .guild-profile, .guild-mode-chip, .guild-quick, .guild-action, .guild-nav-item { transition: none; }
 }
 
 /* 战绩弹层 */
