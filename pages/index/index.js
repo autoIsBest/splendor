@@ -11,6 +11,7 @@ const L = require('../../utils/leaderboard.js');
 const Nick = require('../../utils/nickname.js');
 const T = require('../../utils/theme.js');
 const V = require('../../utils/reset-vote.js');
+const Ent = require('../../utils/entertainment.js');
 
 // 设计稿舞台尺寸（与参考截图比例一致），运行时等比缩放适配屏幕
 const DESIGN_W = 1080;
@@ -1476,6 +1477,10 @@ function buildViewModel(state, ui, layout, ctx) {
       menuDirClass: menuDirClass,
       menuToggleLabel: '菜单',
       chatPanelTop: safeChatTop,
+      // 娱乐模式字段在非牌桌屏给空值，满足 WXML 根变量声明校验
+      isEntertainment: false,
+      buffPick: { open: false, list: [], chosen: '' },
+      skill: { open: false, list: [], targets: [], result: null, pending: '' },
       // 非牌桌屏也要声明 chat：WXML 根变量缺声明会被静态校验拦下，
       // 且 setData 不带 chat 时 wx:for 遍历 undefined 会在部分 WebView 里报错
       chat: C.chatVM([], seat, Date.now(), false, 'text', {
@@ -1891,6 +1896,34 @@ function buildViewModel(state, ui, layout, ctx) {
     menuDirClass: menuDirClass,
     menuToggleLabel: ui.menuOpen ? '收起' : '菜单',
     chatPanelTop: safeChatTop,
+    // 娱乐模式视图：模式标识 / 增益选择弹层 / 技能面板
+    isEntertainment: Ent.isEntertainment(state),
+    buffPick: (function () {
+      if (!Ent.isEntertainment(state)) return { open: false };
+      const mine = state.entertainment.buffs[seat];
+      return {
+        open: !!ui.buffPickOpen && !mine,
+        list: Ent.BUFFS.map(function (b) { return b; }),
+        chosen: mine || ''
+      };
+    })(),
+    skill: (function () {
+      if (!Ent.isEntertainment(state)) return { open: false, list: [], targets: [], result: null, pending: '' };
+      const raw = ui.skillResultInfo || null;
+      let result = null;
+      if (raw) {
+        result = raw.gem
+          ? { title: '窃取得手', text: '从对手处夺得 1 枚' + (raw.gem === 'gold' ? '黄金' : raw.gem) + '筹码' }
+          : { title: '侦察结果', text: raw.names && raw.names.length ? '对手预留：' + raw.names.join('、') : '对手没有预留手牌' };
+      }
+      return {
+        open: !!ui.skillPanelOpen,
+        list: Ent.skillVM(state, seat),
+        targets: Ent.targetVM(state, seat),
+        pending: ui.skillPending || '',
+        result: result
+      };
+    })(),
     chat: (function () {
       const vm = C.chatVM(ui.chatMessages, seat, Date.now(), ui.chatPanelOpen, ui.chatTab, {
         pendingEmoji: ui.chatPendingEmoji || null,
@@ -2125,6 +2158,11 @@ function freshUI(config) {
     inviteNotice: '',
     // 大厅：选中的对局模式（当前只有 standard 可用）
     lobbyMode: 'standard',
+    // 娱乐模式：增益选择弹层 / 技能面板 / 当前选中的技能 / 上次技能结果
+    buffPickOpen: false,
+    skillPanelOpen: false,
+    skillPending: null,
+    skillResultInfo: null,
     // 战绩弹层
     showRecords: false,
     recordsNotice: '',
@@ -2351,6 +2389,13 @@ Page({
     const profile = this.profile || R.getProfile();
     const seats = R.makeSeats(this.ui.playerCount, this.ui.bots, profile);
     this.state = E.createGame({ playerCount: this.ui.playerCount, seats: seats });
+    // 娱乐模式：写入模式字段并弹出增益选择（本机席位）
+    if (this.ui.lobbyMode === 'entertainment') {
+      Ent.enable(this.state);
+      this.ui.buffPickOpen = true;
+    } else {
+      this.ui.buffPickOpen = false;
+    }
     // 一局一条：即使没有云端，本地战绩去重也用得上
     this.state.gameId = newGameId();
     // 人机局不计时：单人对着 AI 看倒计时没有意义
@@ -3717,6 +3762,12 @@ Page({
     if (!entering) return;
     this._resultRecorded = !!(ended || (sameGame && this._resultRecorded));
     if (!sameGame && !ended) this._gameStartedAt = Date.now();
+    // 娱乐模式：联机各端首次进场时，若本机席位尚未选增益则弹出选择层。
+    // 只在进入新局且非终局时弹，避免每次轮询覆盖玩家正在进行的选 buff 操作。
+    if (!sameGame && !ended && Ent.isEntertainment(st)) {
+      const mine = st.entertainment.buffs[this.mySeat || 0];
+      this.ui.buffPickOpen = !mine;
+    }
   },
 
   /** 房主开局后，其他设备轮询到 status=playing 时切入牌桌 */
@@ -4243,6 +4294,8 @@ Page({
     }
     if (preShowcase) this.ui.showcase = preShowcase;
     this.stampAction(action, card, actorSeat);
+    // 娱乐技能：把引擎返回的结果信息留给面板展示（如侦察到对手的预留手牌）
+    if (action.type === 'skill' && result.info) this.ui.skillResultInfo = result.info;
     this.ui.selectedGems = [];
     this.ui.discardPlan = [];
     this.ui.detail = null;
@@ -4767,17 +4820,88 @@ Page({
 
   /* ---------- 大厅：模式选择 / 战绩 ---------- */
 
-  /** 当前只开放标准模式，其余模式点一下给出明确说明，不做假入口 */
+  /** 选择对局模式；筹备中的模式给出明确说明，不做假入口 */
   onSelectMode(event) {
     const key = event.currentTarget.dataset.key;
     const mode = U.modeByKey(key);
     if (!mode.available) {
-      this.ui.homeNotice = '「' + mode.name + '」还在筹备中，当前只开放标准模式';
+      this.ui.homeNotice = '「' + mode.name + '」还在筹备中，暂未开放';
       this.refresh('');
       return;
     }
     this.ui.lobbyMode = mode.key;
-    this.ui.homeNotice = '';
+    this.ui.homeNotice = mode.key === 'entertainment'
+      ? '娱乐模式：开局自选增益，局中可消耗回合使用技能' : '';
+    this.refresh('');
+  },
+
+  /* ---------- 娱乐模式：开局增益 / 主动技能 ---------- */
+
+  /** 开局选择增益：写入 state（随快照同步），机器人自动补齐，再继续 AI 流程 */
+  onPickBuff(event) {
+    if (!Ent.isEntertainment(this.state) || this.ui.buffPickOpen === false) return;
+    const id = event && event.currentTarget && event.currentTarget.dataset.id;
+    const r = Ent.applyBuff(this.state, this.mySeat || 0, id, Math.random);
+    if (!r.ok) { this.refresh(r.error); return; }
+    // 机器人席位各自自动选一个，避免它们没有增益（纯数据层保证守恒）
+    const s = this.state;
+    for (let i = 0; i < s.players.length; i++) {
+      if (!s.players[i].isAI || s.entertainment.buffs[i]) continue;
+      const pool = Ent.BUFFS;
+      Ent.applyBuff(s, i, pool[Math.floor(Math.random() * pool.length)].id, Math.random);
+    }
+    this.ui.buffPickOpen = false;
+    haptic('light');
+    this.refresh('已获得增益 · ' + (r.detail || ''));
+    this.pushCloudState();
+    this.maybeRunAi({ ended: true });
+  },
+
+  /** 打开技能面板：仅本人回合、无待处理事项时可用 */
+  onOpenSkillPanel() {
+    if (!Ent.isEntertainment(this.state)) return;
+    const s = this.state;
+    if (s.gameOver || s.current !== this.mySeat || s.pendingDiscard > 0 || s.pendingNoble) {
+      this.refresh('当前不能使用技能');
+      return;
+    }
+    this.ui.menuOpen = false;
+    this.ui.skillPanelOpen = true;
+    this.ui.skillPending = null;
+    this.ui.skillInfo = null;
+    this.refresh('');
+  },
+  onCloseSkillPanel() {
+    this.ui.skillPanelOpen = false;
+    this.ui.skillPending = null;
+    this.refresh('');
+  },
+  /** 选技能：两种技能都要选目标，进入目标选择态 */
+  onSelectSkill(event) {
+    if (!this.ui.skillPanelOpen) return;
+    const id = event && event.currentTarget && event.currentTarget.dataset.id;
+    const chk = Ent.canUseSkill(this.state, this.mySeat || 0, id);
+    if (!chk.ok) { this.refresh(chk.error); return; }
+    this.ui.skillPending = id;
+    this.refresh('选择一名对手作为目标');
+  },
+  /** 选目标：执行引擎 skill action（消耗整回合），走统一同步链路 */
+  onPickSkillTarget(event) {
+    const id = this.ui.skillPending;
+    if (!id || !this.ui.skillPanelOpen) return;
+    const target = Number(event && event.currentTarget && event.currentTarget.dataset.seat);
+    const chk = Ent.canUseSkill(this.state, this.mySeat || 0, id);
+    if (!chk.ok) { this.refresh(chk.error); return; }
+    const okDone = this.applyPlayerAction({ type: 'skill', skillId: id, target: target, rand: Math.random });
+    if (okDone) {
+      this.ui.skillPanelOpen = false;
+      this.ui.skillPending = null;
+      this.refresh('');
+    }
+  },
+  /** 关闭技能结果提示（侦察战报） */
+  onDismissSkillResult() {
+    this.ui.skillResultInfo = null;
     this.refresh('');
   },
   onOpenRecords() {
@@ -5115,6 +5239,10 @@ Page({
     // 回合计时随房间配置下发，所有设备看到同一份限时
     this.state.turnLimit = R.normTurnLimit(this.room.turnLimit);
     this.state.themeId = T.roomId(this.room);
+    // 娱乐模式由房主建房时选定，写进 state 随快照下发；其他端据此弹增益选择
+    if (this.ui.lobbyMode === 'entertainment') {
+      Ent.enable(this.state);
+    }
     this.room.seats = seats;
     this.room.status = 'playing';
     this.room.playerCount = seats.length;

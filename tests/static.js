@@ -110,7 +110,7 @@ else ok('WXML 标签闭合平衡');
 // moduleFiles，预览里拿到的会是空对象，真机正常、H5 白屏，极难排查。
 (function () {
   const buildJs = read('preview/build.js');
-  ['chat', 'leaderboard'].forEach(function (name) {
+  ['chat', 'leaderboard', 'entertainment'].forEach(function (name) {
     const decl = "['" + name + "', 'utils/" + name + ".js']";
     if (buildJs.indexOf(decl) < 0) fail('preview/build.js 未注册模块: ' + name);
   });
@@ -315,6 +315,37 @@ if (!/\['reset-vote',\s*'utils\/reset-vote\.js'\]/.test(buildJs)) {
   fail('preview/build.js 未注册 reset-vote 模块（预览会报 module not found）');
 }
 ok('重开投票 · 弹层渲染 / catchtap 绑定 / 预览模块已注册');
+
+// 7.9 娱乐模式：模式入口 / 事件处理器 / 技能走引擎分支 / buff 弹层渲染。
+// 这类功能最容易漏的是「WXML 加了按钮但 JS 没处理器」和「技能只改数据不结束回合」，
+// 这里把两条链路都锁住。
+(function () {
+  const userSrc = read('utils/user.js');
+  const entSrc = read('utils/entertainment.js');
+  const engineSrc = read('utils/game-engine.js');
+  const wxml = read('pages/index/index.wxml');
+  // 模式目录必须注册娱乐模式且可用
+  if (!/key:\s*'entertainment'[^}]*available:\s*true/.test(userSrc)) {
+    fail('utils/user.js 必须注册可用的 entertainment 模式');
+  }
+  // 引擎必须有 skill 分支，且调用 endTurn（技能消耗整回合）
+  if (!/case\s*'skill'/.test(engineSrc) || !/Ent\.isEntertainment\(state\)/.test(engineSrc)) {
+    fail('game-engine 缺少娱乐模式 skill 分支');
+  }
+  // 娱乐数据层必须拦截「满 10 枚仍窃取」，否则 endTurn 会带 11 枚破坏守恒
+  if (!/tokenTotal\(me\)\s*>=\s*10/.test(entSrc)) {
+    fail('entertainment.js 缺少「满 10 枚禁止窃取」的守恒保护');
+  }
+  // WXML 弹层与事件处理器齐全
+  ['onPickBuff', 'onOpenSkillPanel', 'onSelectSkill', 'onPickSkillTarget', 'onDismissSkillResult'].forEach(function (fn) {
+    if (wxml.indexOf(fn) < 0) fail('娱乐模式 WXML 缺少事件: ' + fn);
+    if (pageJs.indexOf(fn + '(') < 0) fail('页面缺少娱乐模式处理器: ' + fn);
+  });
+  if (wxml.indexOf('buffPick.open') < 0 || wxml.indexOf('skill.open') < 0) {
+    fail('娱乐模式弹层未渲染');
+  }
+  ok('娱乐模式 · 模式注册 / 引擎分支 / 守恒保护 / 事件与弹层齐全');
+})();
 
 // 8. 本地引用检查（require 路径）
 const reqRe = /require\(['"]([^'"]+)['"]\)/g;

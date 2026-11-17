@@ -278,6 +278,9 @@ const compiled = compileWxml(wxml);
 const moduleFiles = [
   ['nickname', 'utils/nickname.js'],
   ['game-data', 'utils/game-data.js'],
+  // game-engine 依赖 entertainment，故 entertainment 必须排在它前面；
+  // 而 entertainment 依赖 game-data，已满足。顺序错会 module not found。
+  ['entertainment', 'utils/entertainment.js'],
   ['game-engine', 'utils/game-engine.js'],
   ['ai', 'utils/ai.js'],
   ['theme', 'utils/theme.js'],

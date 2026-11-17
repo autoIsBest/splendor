@@ -1033,5 +1033,34 @@ console.log('四主题入口 / 三套主题房间与牌桌 / 退房恢复 OK');
   console.log('渲染层 · 重开投票（票态 / 按钮门禁 / 否决 / 收起 / 不与结算叠加） OK');
 }
 
+// 娱乐模式：模式入口 / 增益选择弹层 / 技能面板渲染
+{
+  const e = run(1280, 720);
+  const p = e.page;
+  // 模式选择器在配置弹层内，先打开人机设置弹层
+  p.onOpenHomeDialog({ currentTarget: { dataset: { kind: 'solo' } } });
+  assert(e.host.innerHTML.indexOf('对局模式') > 0, '配置弹层应渲染对局模式选择');
+  assert(e.host.innerHTML.indexOf('娱乐模式') > 0, '模式列表应含娱乐模式');
+  p.onSelectMode({ currentTarget: { dataset: { key: 'entertainment' } } });
+  p.onStartSolo();
+  // 增益选择弹层
+  assert(e.host.innerHTML.indexOf('选择开局增益') > 0, '娱乐开局应渲染增益选择弹层');
+  assert(e.host.innerHTML.indexOf('富矿') > 0 && e.host.innerHTML.indexOf('黄金运') > 0, '增益弹层列出具体选项');
+  assert((e.host.innerHTML.match(/class="buff-choice /g) || []).length === 3, '三个增益选项');
+  p.onPickBuff({ currentTarget: { dataset: { id: 'rich' } } });
+  assert(e.host.innerHTML.indexOf('选择开局增益') < 0, '选完增益后弹层关闭');
+  // 技能面板：设回本机回合再打开
+  p.state.current = 0;
+  p.state.pendingDiscard = 0; p.state.pendingNoble = null;
+  p.onOpenSkillPanel();
+  assert(e.host.innerHTML.indexOf('主动技能') > 0, '可打开技能面板');
+  assert(e.host.innerHTML.indexOf('窃取') > 0 && e.host.innerHTML.indexOf('侦察') > 0, '列出窃取与侦察');
+  p.onSelectSkill({ currentTarget: { dataset: { id: 'scout' } } });
+  assert(e.host.innerHTML.indexOf('选择技能目标') > 0, '选技能后进入目标选择');
+  assert(e.host.innerHTML.indexOf('data-seat=') > 0, '目标选择渲染席位按钮');
+  p.onUnload();
+  console.log('渲染层 · 娱乐模式（模式入口 / 增益 / 技能面板） OK');
+}
+
 console.log('\nALL PREVIEW TESTS PASSED');
 process.exit(0);

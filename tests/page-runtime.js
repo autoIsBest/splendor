@@ -2164,6 +2164,59 @@ console.log('OK  终局提示 · 指名达标者 / 剩余回合 / 结算后消�
             console.log('OK  昵称脱敏 · 牌桌/大厅/房间/分享/聊天全出口覆盖，设置页保留原字');
           }
 
+          /* ---------- 娱乐模式：模式入口 / 增益 / 技能端到端 ---------- */
+          {
+            // 首页选娱乐模式：模式目录里应可选
+            page.ui.screen = 'home';
+            page.ui.lobbyMode = 'standard';
+            page.onSelectMode({ currentTarget: { dataset: { key: 'entertainment' } } });
+            assert(page.ui.lobbyMode === 'entertainment', '首页可选娱乐模式');
+            assert(page.data.home.modes.some(function (m) { return m.key === 'entertainment' && m.available; }), 'VM 暴露娱乐模式且可用');
+
+            // 开一局人机娱乐模式
+            page.onStartSolo();
+            assert(page.state && page.state.mode === 'entertainment', '开局写入娱乐模式');
+            assert(page.data.isEntertainment === true, '牌桌 VM 标记娱乐模式');
+            assert(page.data.buffPick.open === true, '本机未选增益时弹出选择层');
+            assert(page.data.buffPick.list.length === 3, '增益选择层列出 3 个');
+
+            // 选「富矿」
+            const tokBefore = page.state.players[0].tokens;
+            const total0 = ['white','blue','green','red','black','gold'].reduce(function (s, g) { return s + tokBefore[g]; }, 0);
+            page.onPickBuff({ currentTarget: { dataset: { id: 'rich' } } });
+            assert(page.state.entertainment.buffs[0] === 'rich', '增益写入 state');
+            assert(page.data.buffPick.open === false, '选完关闭增益层');
+            const total1 = ['white','blue','green','red','black','gold'].reduce(function (s, g) { return s + page.state.players[0].tokens[g]; }, 0);
+            assert(total1 === total0 + 2 || total1 <= 10, '富矿增加筹码且不超 10');
+            // 机器人席位自动补齐增益
+            for (let i = 1; i < page.state.players.length; i++) {
+              assert(!!page.state.entertainment.buffs[i], '机器人席位 ' + i + ' 自动选了增益');
+            }
+
+            // 技能面板：把当前回合设回本机，确保能开面板
+            page.state.current = 0;
+            page.state.pendingDiscard = 0; page.state.pendingNoble = null;
+            page.onOpenSkillPanel();
+            assert(page.data.skill.open === true, '本人回合可打开技能面板');
+            assert(page.data.skill.list.length === 2, '列出两个技能');
+
+            // 选窃取 -> 选目标（对手 1 号席先给点筹码）
+            page.state.players[1].tokens.blue = Math.max(3, page.state.players[1].tokens.blue);
+            const p0blue = page.state.players[0].tokens.blue, p1blue = page.state.players[1].tokens.blue;
+            const cur = page.state.current, turn = page.state.turnCount;
+            page.onSelectSkill({ currentTarget: { dataset: { id: 'steal' } } });
+            assert(page.data.skill.pending === 'steal', '进入目标选择态');
+            page.onPickSkillTarget({ currentTarget: { dataset: { seat: 1 } } });
+            assert(page.state.players[0].tokens.blue + page.state.players[1].tokens.blue === p0blue + p1blue, '窃取双方蓝色总量守恒');
+            assert(page.state.turnCount === turn + 1 || page.state.current !== cur, '技能消耗整回合');
+            assert(page.data.skill.open === false, '用完后关闭技能面板');
+            assert(page.state.entertainment.used[0].steal === 1, '记录技能使用次数');
+
+            // 复原模式，避免影响后续（虽然已到末尾）
+            page.ui.lobbyMode = 'standard';
+            console.log('OK  娱乐模式 · 模式入口 / 增益选择 / 窃取技能 / 回合消耗');
+          }
+
           page.onUnload();
           console.log('ALL RUNTIME CHECKS PASSED');
         } catch (e2) {

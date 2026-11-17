@@ -8,6 +8,7 @@
  */
 
 const D = require('./game-data.js');
+const Ent = require('./entertainment.js');
 const GEMS = D.GEMS;
 const ALL_TOKENS = D.ALL_TOKENS;
 
@@ -536,6 +537,22 @@ function performAction(state, action) {
       return doBuy(state, card, function () {
         p.reserved.splice(idx, 1);
       });
+    }
+
+    // 娱乐模式主动技能：数据层改状态，这里统一收尾（技能消耗整回合）。
+    // 注意 applySkill 成功后才 endTurn；失败则原样返回，不推进回合、不扣次数。
+    case 'skill': {
+      if (!Ent.isEntertainment(state)) return fail('当前不是娱乐模式');
+      const r = Ent.applySkill(state, state.current, action.skillId, action.target, action.rand);
+      if (!r.ok) return fail(r.error);
+      // 窃取已在数据层拦截「满 10 枚仍窃取」，因此技能后必然 ≤10，
+      // 无需退还流程，直接收尾即可（侦察不改筹码）。
+      const turn = endTurn(state);
+      return {
+        ok: true, message: r.message, info: r.info,
+        needDiscard: false, discardCount: 0,
+        ended: !turn.waitingNoble, waitingNoble: !!turn.waitingNoble, gameOver: !!turn.gameOver
+      };
     }
 
     default:

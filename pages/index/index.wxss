@@ -3418,3 +3418,41 @@ page, .viewport { width: 100vw; height: 100vh; overflow: hidden; }
   border: 1px solid rgba(255, 240, 190, .9);
 }
 .lb-hint-hover { opacity: .85; }
+
+/* ========== 娱乐模式：增益选择 / 技能面板 / 战报 ========== */
+.ent-overlay { z-index: 26; }
+.ent-dialog { width: 560px; padding: 16px 18px 18px; }
+.ent-dialog-sub { display: block; font-size: 13px; color: #d9bf95; margin: 2px 0 12px; text-align: center; }
+.buff-choices, .skill-choices { display: flex; flex-direction: column; gap: 8px; }
+.buff-choice, .skill-choice {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px; border-radius: 9px; min-height: 58px; box-sizing: border-box;
+  border: 1px solid rgba(226, 190, 126, .35);
+  background: rgba(255, 240, 200, .06);
+}
+.buff-choice.is-active { border-color: #f4d48d; background: linear-gradient(180deg, rgba(255,228,161,.22), rgba(200,146,56,.16)); }
+.buff-icon, .skill-icon { font-size: 30px; width: 40px; text-align: center; flex-shrink: 0; }
+.buff-copy, .skill-copy { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.buff-name, .skill-name { font-size: 16px; font-weight: 700; color: #ffe6b4; }
+.buff-desc, .skill-desc { font-size: 12px; line-height: 1.4; color: #d9c19a; }
+.buff-check { font-size: 12px; font-weight: 700; color: #3a2606; padding: 2px 8px; border-radius: 4px; background: linear-gradient(180deg, #fff2c4, #ffd979); }
+.skill-left { font-size: 12px; font-weight: 500; color: #e2a860; }
+.skill-choice.is-locked { opacity: .45; }
+.skill-targets { display: flex; flex-direction: column; gap: 8px; }
+.skill-target {
+  padding: 12px; border-radius: 8px; text-align: center; font-size: 15px; color: #ffe6b4;
+  border: 1px solid rgba(226, 190, 126, .4); background: rgba(255, 240, 200, .08);
+}
+.skill-target.is-disabled { opacity: .4; }
+.skill-back { margin-top: 4px; }
+.ent-result {
+  position: absolute; left: 50%; top: 76px; transform: translateX(-50%);
+  z-index: 27; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 10px 22px; border-radius: 10px; min-width: 260px; max-width: 520px;
+  border: 1.5px solid #f4d48d;
+  background: linear-gradient(180deg, rgba(84, 40, 60, .97), rgba(24, 10, 19, .97));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .6);
+  animation: fadeIn 160ms ease-out both;
+}
+.ent-result-title { font-size: 16px; font-weight: 700; color: #ffe6b4; }
+.ent-result-text { font-size: 13px; color: #e8cf9f; text-align: center; }

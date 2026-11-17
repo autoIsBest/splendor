@@ -106,13 +106,16 @@ async function run() {
 
   check('模式：只开放标准模式，未知 key 回落标准', function () {
     const modes = U.listModes('standard');
-    assert.equal(modes.length, 3, '三个模式位：标准 / 轮抽 / 双人协作');
+    assert.equal(modes.length, 4, '四个模式位：标准 / 娱乐 / 轮抽 / 双人协作');
     assert.equal(modes[0].key, 'standard');
     assert.equal(modes[0].available, true);
     assert.equal(modes[0].active, true);
-    assert.equal(modes[1].available, false, '轮抽模式应为筹备中');
-    assert.equal(modes[2].available, false, '双人协作应为筹备中');
-    assert.equal(modes[1].tag, '筹备中');
+    assert.equal(modes[1].key, 'entertainment', '第二位是娱乐模式');
+    assert.equal(modes[1].available, true, '娱乐模式已开放');
+    assert.equal(modes[2].available, false, '轮抽模式应为筹备中');
+    assert.equal(modes[3].available, false, '双人协作应为筹备中');
+    assert.equal(modes[2].tag, '筹备中');
+    assert.equal(U.modeByKey('entertainment').available, true);
     assert.equal(U.modeByKey('draft').name, '轮抽模式');
     assert.equal(U.modeByKey('__nope__').key, 'standard', '未知模式必须回落标准模式');
   });

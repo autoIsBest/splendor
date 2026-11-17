@@ -40,9 +40,10 @@ const MAX_RECORDS = 60;
 const MAX_AVATAR_CHARS = 24000;
 const AVATAR_CACHE_TTL = 6 * 60 * 60 * 1000;
 
-/* 对局模式：当前只开放标准模式；其余仅作展示，不伪装成可选 */
+/* 对局模式：标准 + 娱乐已开放；其余仅作展示，不伪装成可选 */
 const MODES = [
   { key: 'standard', name: '标准模式', desc: '基础规则 · 先达 15 声望获胜', available: true },
+  { key: 'entertainment', name: '娱乐模式', desc: '开局选增益 · 局中可用窃取/侦察技能', available: true },
   { key: 'draft', name: '轮抽模式', desc: '牌库轮抽组牌 · 筹备中', available: false },
   { key: 'team', name: '双人协作', desc: '两人一队共享声望 · 筹备中', available: false }
 ];

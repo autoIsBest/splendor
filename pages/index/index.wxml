@@ -563,12 +563,76 @@
             <view class="game-menu-ic"><text>↺</text></view>
             <text class="game-menu-item-title">重新开始</text>
           </view>
+          <view wx:if="{{isEntertainment}}" class="game-menu-item" catchtap="onOpenSkillPanel" hover-class="game-menu-item-hover">
+            <view class="game-menu-ic"><text>✦</text></view>
+            <text class="game-menu-item-title">主动技能</text>
+          </view>
           <view class="game-menu-item is-danger" catchtap="onMenuQuitGame" hover-class="game-menu-item-hover">
             <view class="game-menu-ic"><text>⏻</text></view>
             <text class="game-menu-item-title">投降</text>
           </view>
         </view>
       </view>
+    </view>
+
+    <!-- ========== 娱乐模式：开局增益选择（本机席位，未选前不可关闭） ========== -->
+    <view wx:if="{{buffPick.open}}" class="overlay ent-overlay" catchtap="noop">
+      <view class="dialog ent-dialog" catchtap="noop">
+        <view class="guild-dialog-head">
+          <text class="dialog-title">选择开局增益</text>
+        </view>
+        <text class="ent-dialog-sub">娱乐模式 · 每局选择一个，全桌各自选择</text>
+        <view class="buff-choices">
+          <view wx:for="{{buffPick.list}}" wx:key="id"
+                class="buff-choice {{buffPick.chosen === item.id ? 'is-active' : ''}}"
+                bindtap="onPickBuff" data-id="{{item.id}}" hover-class="theme-choice-hover">
+            <text class="buff-icon">{{item.icon}}</text>
+            <view class="buff-copy">
+              <text class="buff-name">{{item.name}}</text>
+              <text class="buff-desc">{{item.desc}}</text>
+            </view>
+            <text wx:if="{{buffPick.chosen === item.id}}" class="buff-check">已选</text>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <!-- ========== 娱乐模式：主动技能面板 ========== -->
+    <view wx:if="{{skill.open}}" class="overlay ent-overlay" bindtap="onCloseSkillPanel">
+      <view class="dialog ent-dialog" catchtap="noop">
+        <view class="guild-dialog-head">
+          <text class="dialog-title">{{skill.pending ? '选择技能目标' : '主动技能'}}</text>
+          <view class="guild-dialog-close" bindtap="onCloseSkillPanel">×</view>
+        </view>
+        <text class="ent-dialog-sub">使用技能将消耗整个回合</text>
+        <!-- 第一步：选技能 -->
+        <view wx:if="{{!skill.pending}}" class="skill-choices">
+          <view wx:for="{{skill.list}}" wx:key="id"
+                class="skill-choice {{item.usable ? '' : 'is-locked'}}"
+                bindtap="onSelectSkill" data-id="{{item.id}}" hover-class="theme-choice-hover">
+            <text class="skill-icon">{{item.icon}}</text>
+            <view class="skill-copy">
+              <text class="skill-name">{{item.name}} · 剩 {{item.left}} 次</text>
+              <text class="skill-desc">{{item.desc}}</text>
+            </view>
+          </view>
+        </view>
+        <!-- 第二步：选目标 -->
+        <view wx:if="{{skill.pending}}" class="skill-targets">
+          <view wx:for="{{skill.targets}}" wx:key="seat"
+                class="skill-target {{item.selectable ? '' : 'is-disabled'}}"
+                bindtap="onPickSkillTarget" data-seat="{{item.seat}}" hover-class="theme-choice-hover">
+            <text class="skill-target-name">{{item.name}}{{item.isSelf ? '（你）' : ''}}{{item.selectable ? '' : ' · 不可选'}}</text>
+          </view>
+          <view class="btn skill-back" bindtap="onCloseSkillPanel">返回</view>
+        </view>
+      </view>
+    </view>
+
+    <!-- ========== 娱乐模式：技能结果战报 ========== -->
+    <view wx:if="{{skill.result}}" class="ent-result" bindtap="onDismissSkillResult">
+      <text class="ent-result-title">{{skill.result.title}}</text>
+      <text class="ent-result-text">{{skill.result.text}}</text>
     </view>
     </view>
     <!-- ========== /牌桌图层 ========== -->
@@ -655,6 +719,19 @@
             <view class="guild-dialog-close" bindtap="onCloseHomeDialog">×</view>
           </view>
           <view class="guild-config">
+            <!-- 对局模式：标准 / 娱乐。人机与建房共用，选中后随开局写入 state.mode -->
+            <view class="theme-picker mode-picker">
+              <view class="theme-picker-head"><text class="theme-picker-label">对局模式</text><text class="theme-picker-note">{{home.modeHint}}</text></view>
+              <view class="mode-choices">
+                <view wx:for="{{home.modes}}" wx:key="key"
+                      class="mode-choice {{item.active ? 'is-active' : ''}} {{item.available ? '' : 'is-locked'}}"
+                      bindtap="onSelectMode" data-key="{{item.key}}" hover-class="theme-choice-hover">
+                  <text class="mode-choice-name">{{item.name}}</text>
+                  <text class="mode-choice-tag">{{item.tag}}</text>
+                  <text class="mode-choice-desc">{{item.desc}}</text>
+                </view>
+              </view>
+            </view>
             <view wx:if="{{home.dialog === 'create'}}" class="theme-picker">
               <view class="theme-picker-head"><text class="theme-picker-label">房间主题</text><text class="theme-picker-note">房主选择 · 全桌共享</text></view>
               <view class="theme-choices">
