@@ -894,9 +894,9 @@ console.log('完整对局 ' + steps + ' 步 + 结算后重绘 OK');
 // Exercise the compiled template/module bundle for every new room theme.
 const themesPreview = run(844, 390);
 const tp = themesPreview.page;
-['pokemon', 'pixel', 'immortal'].forEach(function (id) {
+['genshin', 'pokemon', 'pixel', 'immortal'].forEach(function (id) {
   tp.onOpenHomeDialog({ currentTarget: { dataset: { kind: 'create' } } });
-  assert((themesPreview.host.innerHTML.match(/data-tap="onSelectRoomTheme"/g) || []).length === 3, '建房须提供三套主题');
+  assert((themesPreview.host.innerHTML.match(/data-tap="onSelectRoomTheme"/g) || []).length === 4, '建房须提供四套主题');
   assert(themesPreview.host.innerHTML.indexOf('theme-thumb-pixel') > 0, '建房应展示红白机像素主题入口');
   assert(themesPreview.host.innerHTML.indexOf('theme-thumb-immortal') > 0, '建房应展示凡人修仙传主题入口');
   assert(themesPreview.host.innerHTML.indexOf('theme-thumb-royal') < 0, '皇家商会已从选择器停用');

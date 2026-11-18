@@ -74,7 +74,7 @@ function tap(page, name, data) { return page[name]({ currentTarget: { dataset: d
 async function flush() { await new Promise(function (resolve) { setImmediate(resolve); }); }
 
 async function main() {
-  assert.deepStrictEqual(T.list().map(function (t) { return t.id; }), ['pokemon', 'pixel', 'immortal']);
+  assert.deepStrictEqual(T.list().map(function (t) { return t.id; }), ['genshin', 'pokemon', 'pixel', 'immortal']);
   assert.equal(T.has('royal'), true);
   assert.equal(T.selectable('royal'), false);
   assert.equal(T.has('cyberpunk'), false);
@@ -99,7 +99,13 @@ async function main() {
   assert.equal(T.forView('game', { themeId: 'immortal' }, { themeId: 'pixel' }).fallback, false);
   const first = T.list('pixel');
   first[0].name = 'changed';
-  assert.equal(T.list()[0].name, '宝可梦');
+  assert.equal(T.list()[0].name, '原神');
+  assert.equal(T.caption('genshin', 6), '旅行者·空');
+  assert.equal(T.caption('genshin', 7), '旅行者·荧');
+  const genshinCss = fs.readFileSync(path.join(ROOT, 'pages/index/theme-genshin.wxss'), 'utf8');
+  const embedded = genshinCss.match(/data:image\/jpeg;base64,([^"\)]+)/g) || [];
+  assert.equal(embedded.length, 1, '原神图集只嵌入一次');
+  assert(Buffer.from(embedded[0].split(',')[1], 'base64').equals(fs.readFileSync(path.join(ROOT, 'preview/thumbs/themes/genshin-review-atlas.jpg'))));
   console.log('PASS theme registry, isolated UI, safe fallback and snapshot precedence');
 
   const cards = [].concat.apply([], D.buildDecks(D.mulberry32(430)));
