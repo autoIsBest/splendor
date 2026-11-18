@@ -1,15 +1,14 @@
-"""Compress generated 3x3 contact sheets for the shared theme art pipeline.
+"""Compress generated contact sheets for the shared theme art pipeline.
 
 Usage: uv run --with pillow python preview/prepare-theme-art.py SOURCE_DIRECTORY [THEME ...]
 Raw generated images stay outside the mini-program project.
 
 尺寸与质量的依据（2026-11-12 实测）：
-  图集只以 background-size:300% 300% 复用，单格在牌桌的实际显示尺寸为
+  图集只以 background-size 百分比复用，单格在牌桌的实际显示尺寸为
   卡面 92x112 / 头像 64x80 / 建房预览缩略图，160px 图集分辨率明显过剩。
-  主题样式是把整张图集 base64 内嵌进 WXSS 的，体积直接计入主包 2MiB 预算，
-  三套合计曾经顶到 194KB。降到 144px/格（432 总宽）+ q52 后单套约 36KB，
-  三套合计约 143KB，比原来省约 51KB；在 432px 与 q52 下肉眼无可察觉劣化
-  （含赛博朋克深色渐变，未见色带或块状伪影）。
+  主题样式是把整张图集 base64 内嵌进 WXSS 的，体积直接计入主包 2MiB 预算。
+  目前统一使用 144px/格（宝可梦 432x432，像素/凡人修仙传 576x432），
+  q52 下肉眼无明显劣化，且仍为单套约 36-60KB。
 
   注意：不要用 macOS 的 sips 重编码，它的 JPEG 编码器效率明显低于 PIL
   optimize=True，同一张图会从 36KB 涨到 70KB+。
@@ -19,33 +18,40 @@ from pathlib import Path
 import sys
 from PIL import Image
 
-TILE = 144          # 单格边长，3 格合计 432
+TILE = 144          # 单格边长
 QUALITY = 52
 SUBSAMPLING = 2     # 4:2:0，深色渐变下未见色带
 
-ALL_THEMES = ("pokemon", "cyberpunk", "ai", "pixel")
-ACTIVE_THEMES = ("pokemon", "ai", "pixel")
+GRIDS = {
+    "pokemon": (3, 3),
+    "pixel": (4, 3),
+    "immortal": (4, 3),
+    "cyberpunk": (3, 3),
+    "ai": (3, 3),
+}
+ACTIVE_THEMES = ("pokemon", "pixel", "immortal")
 
 source = Path(sys.argv[1])
 themes = sys.argv[2:] or ACTIVE_THEMES
-if any(theme not in ALL_THEMES for theme in themes):
-    raise SystemExit("Unknown theme; choose pokemon, cyberpunk, ai or pixel")
+if any(theme not in GRIDS for theme in themes):
+    raise SystemExit("Unknown theme; choose pokemon, pixel, immortal, cyberpunk or ai")
 output = Path(__file__).resolve().parent / "thumbs" / "themes"
 output.mkdir(parents=True, exist_ok=True)
 
 for theme in themes:
+    cols, rows = GRIDS[theme]
     image = Image.open(source / f"splendor-{theme}-atlas.png").convert("RGB")
-    atlas = Image.new("RGB", (TILE * 3, TILE * 3))
+    atlas = Image.new("RGB", (TILE * cols, TILE * rows))
     margin = 6 if theme == "pixel" else 3
-    for row in range(3):
-        for col in range(3):
-            box = (round(col * image.width / 3) + margin,
-                   round(row * image.height / 3) + margin,
-                   round((col + 1) * image.width / 3) - margin,
-                   round((row + 1) * image.height / 3) - margin)
+    for row in range(rows):
+        for col in range(cols):
+            box = (round(col * image.width / cols) + margin,
+                   round(row * image.height / rows) + margin,
+                   round((col + 1) * image.width / cols) - margin,
+                   round((row + 1) * image.height / rows) - margin)
             tile = image.crop(box).resize((TILE, TILE), Image.Resampling.LANCZOS)
             atlas.paste(tile, (col * TILE, row * TILE))
     target = output / f"{theme}.jpg"
     atlas.save(target, quality=QUALITY, optimize=True, progressive=False,
                subsampling=SUBSAMPLING)
-    print(f"{theme}: {target.stat().st_size} bytes")
+    print(f"{theme}: {target.stat().st_size} bytes ({atlas.width}x{atlas.height})")

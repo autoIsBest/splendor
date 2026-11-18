@@ -2,7 +2,7 @@
 @import "theme-picker.wxss";
 @import "theme-pokemon.generated.wxss";
 @import "theme-pixel.generated.wxss";
-@import "theme-ai.generated.wxss";
+@import "theme-immortal.generated.wxss";
 
 /* ==================================================================
  * 璀璨宝石 · 皇家典藏版 2.5D 实体牌桌 (Renaissance Royal Edition)

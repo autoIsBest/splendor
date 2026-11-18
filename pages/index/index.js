@@ -2187,7 +2187,7 @@ function freshUI(config) {
     roomCount: c.roomCount || 3,
     // 回合计时（秒）：0 = 不限时；建房时选定
     turnLimit: R.normTurnLimit(c.turnLimit),
-    roomThemeId: T.normalize(c.roomThemeId),
+    roomThemeId: T.normalizeRoom(c.roomThemeId),
     roomCreating: false,
     roomCreateFailed: false,
     homeDialog: '',
@@ -4777,7 +4777,7 @@ Page({
   onSelectRoomTheme(event) {
     if (this.ui.screen !== 'home' || this.ui.homeDialog !== 'create') return;
     const id = event.currentTarget.dataset.id;
-    if (!T.has(id)) return;
+    if (!T.selectable(id)) return;
     this.ui.roomThemeId = id;
     this.refresh('');
   },

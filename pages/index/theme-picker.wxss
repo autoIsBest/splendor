@@ -7,7 +7,7 @@
 .theme-picker-note { font-size: 11px; color: #d1b99a; }
 .theme-choices { display: flex; flex-wrap: wrap; gap: 8px; }
 .theme-choice {
-  position: relative; width: 340px; height: 84px; padding: 5px;
+  position: relative; width: 236px; height: 84px; padding: 5px;
   display: flex; align-items: center; gap: 10px;
   border: 1px solid rgba(243, 212, 139, .3); border-radius: 9px;
   background: #23121c; overflow: hidden;
@@ -20,7 +20,7 @@
 .theme-choice-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .theme-choice-tag { font-size: 8px; letter-spacing: 1.2px; color: #bca78c; }
 .theme-choice-name { font-family: "Songti SC", Georgia, serif; font-size: 18px; font-weight: 700; color: #fff0d0; line-height: 1.2; }
-.theme-choice-desc { font-size: 10px; line-height: 1.3; color: #d9c8b0; white-space: nowrap; }
+.theme-choice-desc { font-size: 10px; line-height: 1.3; color: #d9c8b0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .theme-choice-check { position: absolute; top: 5px; right: 7px; font-size: 10px; color: #ffe2a0; }
 .room-theme { font-size: 11px; font-weight: 600; color: #ebd19c; letter-spacing: .5px; }
 .theme-fallback {

@@ -329,3 +329,38 @@
 - `preview/prepare-theme-art.py` 支持可选主题参数，使用 `SOURCE_DIRECTORY ai` 仅压缩 AI 素材；不传参数时沿用三主题批处理。
 - 已重建主题 WXSS 与 H5 单文件；浏览器核对九个模型名称对应的背景位置，查看 1440×810 桌面、844×390 手机横屏和 GPT 详情，无卡名越界。
 - 完整回归再次 12/12 通过；原生运行文件约 2017.8 KB，仍低于 2 MiB，原生与 H5 体积守卫均通过。微信真机 / 云端验收范围未扩大。
+
+## 15. 三主题收敛与 4×3 图集（2026-11-18）
+
+### 主题范围
+
+- 建房选择器最终保留三套：`pokemon`、`pixel`、`immortal`。
+- `royal` 仅作为首页大厅与未知主题回退，`T.has('royal')` 仍为 true，但 `T.selectable('royal')` 为 false；未知 / 旧 AI 房间回退皇家。
+- `ai` 从 `THEMES` 移除，旧 `theme-ai.generated.wxss` 由构建删除；`cyberpunk` 继续停用。
+- 新房间默认 `pixel`；首页 `forView('home')` 仍回退 `DEFAULT_ID='royal'`。
+
+### 图集与命名
+
+- `pokemon` 保持 3×3、432×432；`pixel` 与 `immortal` 扩为 4×3、576×432。
+- 每格 144px；`pixel` JPEG quality 52，`immortal` quality 65，均使用 4:2:0、optimize，继续内联到生成 WXSS。
+- `pixel` 新增「森林猎手、迷宫法师、机械飞龙」三格；前 9 格保持原图集顺序，背景位置仍按 `i%12` 映射。
+- `immortal` 十二格顺序为：韩立、南宫婉、紫灵、银月、乐上师、仲神师、元瑶、啼魂、慕沛灵、宋玉、梅凝、董萱儿。
+- `immortal` 后缀为练气、筑基、结丹、元婴、化神、炼虚、合体、大乘、渡劫、灵界、飞升、真仙；贵族称号为真人、道祖。
+
+### 凡人修仙传 Q版方案
+
+- 用户最初要求该主题不要生成，先采用联网 / `ego-browser` 查找的写实二创与官方截帧；实际牌桌在 144px 下缩图发糊，用户确认改为 2D Q版。
+- 最终 12 格使用 `ag/gemini-3.1-flash-image` 生成 1024×1024 立绘，统一为粗描边、平涂、大头小身、淡紫背景的 Q版风格；再按固定裁切框合成为 4×3 图集。
+- 十二格顺序为：韩立、南宫婉、紫灵、银月、乐上师、仲神师、元瑶、啼魂、慕沛灵、宋玉、梅凝、董萱儿。
+- 角色 IP 归原作；Q版立绘为本项目生成的主题演绎，仅用于主题演示。此前写实二创 / 官方截帧来源不再使用。
+- 详细生成方式、裁切与压缩参数见 `preview/thumbs/themes/README.md`。
+
+### 验证
+
+- `node preview/art.js` 生成 `theme-pixel.generated.wxss` 与 `theme-immortal.generated.wxss`，并删除 `theme-ai.generated.wxss`；`art.wxss` 651.5 KB。
+- `immortal.jpg` 为 576×432、4×3、每格 144px，quality 65，59844 字节；12 张 Q版立绘逐格裁切后合成。
+- `node preview/build.js` 重建 `index.html`（1707.1 KB）后，H5 预览识别三套入口、三套房间主题与 4×3 背景位置。
+- 浏览器实际查看大厅、建房、凡人主题房、三人牌桌与 12 张 Q版总览；144px 卡面五官、发型与配色均可辨。
+- `NODE_OPTIONS=--no-experimental-webstorage node tests/run-all.js`：16/16 步通过。
+- 原生运行文件合计约 1738.5 KB，低于 2 MiB 预算。
+- 当前仍未进行真实微信多设备联机与真机视觉验收；角色 IP 归原作，Q版立绘仅用于主题演示。

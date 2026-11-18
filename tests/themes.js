@@ -74,21 +74,32 @@ function tap(page, name, data) { return page[name]({ currentTarget: { dataset: d
 async function flush() { await new Promise(function (resolve) { setImmediate(resolve); }); }
 
 async function main() {
-  assert.deepStrictEqual(T.list().map(function (t) { return t.id; }), ['royal', 'pokemon', 'pixel', 'ai']);
+  assert.deepStrictEqual(T.list().map(function (t) { return t.id; }), ['pokemon', 'pixel', 'immortal']);
+  assert.equal(T.has('royal'), true);
+  assert.equal(T.selectable('royal'), false);
   assert.equal(T.has('cyberpunk'), false);
+  assert.equal(T.has('ai'), false);
   assert.equal(T.normalize('cyberpunk'), 'royal');
+  assert.equal(T.normalize('ai'), 'royal');
   assert.equal(T.resolve('cyberpunk').fallback, true);
   assert.equal(T.resolve('cyberpunk').id, 'royal');
   assert.equal(T.resolve('cyberpunk').requestedId, 'cyberpunk');
+  assert.equal(T.resolve('ai').fallback, true);
   assert.equal(T.resolve('future-theme').fallback, true);
   assert.equal(T.resolve('future-theme').id, 'royal');
   assert.equal(T.resolve('royal').fallback, false);
   assert.equal(T.resolve('x" onclick="bad').id, 'royal');
-  assert.equal(T.forView('home', { themeId: 'ai' }, { themeId: 'pokemon' }).id, 'royal');
-  assert.equal(T.forView('game', { themeId: 'ai' }, { themeId: 'pokemon' }).id, 'ai');
-  const first = T.list('ai');
+  assert.equal(T.DEFAULT_ROOM_ID, 'pixel');
+  assert.equal(T.normalizeRoom(undefined), 'pixel');
+  assert.equal(T.normalizeRoom('royal'), 'pixel');
+  assert.equal(T.normalizeRoom('immortal'), 'immortal');
+  assert.equal(T.forView('home', { themeId: 'pixel' }, { themeId: 'pixel' }).id, 'royal');
+  assert.equal(T.forView('game', { themeId: 'ai' }, { themeId: 'pokemon' }).id, 'royal');
+  assert.equal(T.forView('game', { themeId: 'immortal' }, { themeId: 'pixel' }).id, 'immortal');
+  assert.equal(T.forView('game', { themeId: 'immortal' }, { themeId: 'pixel' }).fallback, false);
+  const first = T.list('pixel');
   first[0].name = 'changed';
-  assert.equal(T.list()[0].name, '皇家商会');
+  assert.equal(T.list()[0].name, '宝可梦');
   console.log('PASS theme registry, isolated UI, safe fallback and snapshot precedence');
 
   const cards = [].concat.apply([], D.buildDecks(D.mulberry32(430)));
@@ -96,9 +107,9 @@ async function main() {
   const whiteFirst = cards.find(function (card) { return card.id === 'L1-01'; });
   assert.equal(T.cardName('pokemon', whiteFirst), '皮卡丘·初遇');
   assert.equal(T.cardName('pixel', whiteFirst), '跳跳勇者·关卡');
-  assert.equal(T.cardName('ai', whiteFirst), 'GPT·提示');
-  assert.equal(T.nobleTitle('ai', D.NOBLE_POOL[2]), 'Grok·导师');
-  for (const id of ['pokemon', 'pixel', 'ai']) {
+  assert.equal(T.cardName('immortal', whiteFirst), '韩立·练气');
+  assert.equal(T.nobleTitle('immortal', D.NOBLE_POOL[2]), '仲神师·真人');
+  for (const id of ['pokemon', 'pixel', 'immortal']) {
     const names = cards.map(function (card) { return T.cardName(id, card); });
     assert.equal(new Set(names).size, 90, id + ' needs 90 distinct card names');
     const nobleNames = D.NOBLE_POOL.map(function (noble) { return T.nobleTitle(id, noble); });
@@ -127,8 +138,21 @@ async function main() {
   });
   console.log('PASS 90 distinct themed card names, ten noble titles, legacy log rendering and canonical data isolation');
 
+  ['pixel', 'immortal'].forEach(function (id) {
+    const css = fs.readFileSync(path.join(ROOT, 'pages/index/theme-' + id + '.generated.wxss'), 'utf8');
+    assert(css.indexOf('background-size:400% 300%') >= 0, id + ' must use a four-column atlas');
+    assert(css.indexOf('.card-photo.art-11') >= 0, id + ' must expose twelve atlas slots');
+  });
+  const pokemonCss = fs.readFileSync(path.join(ROOT, 'pages/index/theme-pokemon.generated.wxss'), 'utf8');
+  assert(pokemonCss.indexOf('background-size:300% 300%') >= 0, 'pokemon must keep its three-column atlas');
+  assert.equal(fs.existsSync(path.join(ROOT, 'pages/index/theme-ai.generated.wxss')), false, 'disabled AI theme must not ship styles');
+  const indexWxss = fs.readFileSync(path.join(ROOT, 'pages/index/index.wxss'), 'utf8');
+  assert(indexWxss.indexOf('theme-ai.generated.wxss') < 0, 'AI theme import must be removed');
+  assert(indexWxss.indexOf('theme-immortal.generated.wxss') > 0, 'immortal theme import must be present');
+  console.log('PASS 3x4 atlas styles, 3x3 pokemon layout and disabled-theme asset cleanup');
+
   const baseline = E.createGame({ playerCount: 2, rand: D.mulberry32(430) });
-  for (const id of ['pokemon', 'pixel', 'ai']) {
+  for (const id of ['pokemon', 'pixel', 'immortal']) {
     const themed = E.createGame({ playerCount: 2, rand: D.mulberry32(430) });
     themed.themeId = id;
     const control = JSON.parse(JSON.stringify(baseline));
@@ -145,7 +169,7 @@ async function main() {
   const cloud = mockCloud();
   R.attachCloud(cloud);
   const host = R.saveProfile({ nickname: 'Theme host' });
-  for (const id of ['pokemon', 'pixel', 'ai']) {
+  for (const id of ['pokemon', 'pixel', 'immortal']) {
     const seats = R.makeSeats(3, { 2: true }, host);
     const room = R.createRoom({ profile: host, playerCount: 3, seats: seats, themeId: id });
     assert.equal(room.themeId, id);
@@ -175,6 +199,8 @@ async function main() {
   assert.equal((await R.cloudPullRoom(legacy.code)).room.themeId, 'royal');
   legacyRow.seats[0].roomThemeId = 'cyberpunk';
   assert.equal(T.resolve((await R.cloudPullRoom(legacy.code)).room.themeId).fallback, true);
+  legacyRow.seats[0].roomThemeId = 'ai';
+  assert.equal(T.resolve((await R.cloudPullRoom(legacy.code)).room.themeId).fallback, true);
   legacyRow.seats[0].roomThemeId = 'future-theme';
   assert.equal(T.resolve((await R.cloudPullRoom(legacy.code)).room.themeId).fallback, true);
   console.log('PASS strict deployed-schema transport, joining, ready, start, reconnect, reset and legacy rooms');
@@ -186,14 +212,14 @@ async function main() {
   assert.equal(page.data.home.themes.find(function (t) { return t.active; }).id, 'pokemon');
   assert.equal(page.data.themeId, 'royal', 'building a draft must not recolor the lobby');
   page.onCloseHomeDialog();
-  assert.equal(page.ui.roomThemeId, 'royal', 'cancel restores creation draft');
-  for (const id of ['pokemon', 'pixel', 'ai']) {
+  assert.equal(page.ui.roomThemeId, 'pixel', 'cancel restores creation draft');
+  for (const id of ['pokemon', 'pixel', 'immortal']) {
     tap(page, 'onOpenHomeDialog', { kind: 'create' });
     tap(page, 'onSelectRoomTheme', { id: id });
     page.onCreateRoom();
     assert.equal(page.data.themeId, id);
     assert.equal(page.data.roomScreen.themeName, T.resolve(id).name);
-    tap(page, 'onSelectRoomTheme', { id: 'royal' });
+    tap(page, 'onSelectRoomTheme', { id: id === 'pokemon' ? 'pixel' : 'pokemon' });
     assert.equal(page.data.themeId, id, 'created room theme is immutable');
     tap(page, 'onRoomCount', { n: 2 });
     assert.equal(T.fromSeats(page.room.seats), id, 'changing seat count preserves room metadata');
@@ -289,7 +315,7 @@ async function main() {
   acceptedCloud.failAfterWrite = true;
   const recoveringPage = pageRuntime();
   tap(recoveringPage, 'onOpenHomeDialog', { kind: 'create' });
-  tap(recoveringPage, 'onSelectRoomTheme', { id: 'ai' });
+  tap(recoveringPage, 'onSelectRoomTheme', { id: 'immortal' });
   recoveringPage.onCreateRoom();
   await flush();
   const acceptedRow = acceptedCloud.store.splendor_rooms[0];
@@ -299,7 +325,7 @@ async function main() {
   assert.equal(acceptedCloud.roomWrites, 1, 'uncertain accepted creation must not be upserted again');
   assert.equal(recoveringPage.room.seats[1].uid, 'early-guest');
   assert.equal(recoveringPage._roomVersion, 2);
-  assert.equal(recoveringPage.data.themeId, 'ai');
+  assert.equal(recoveringPage.data.themeId, 'immortal');
   recoveringPage.onUnload();
   R.attachCloud(null);
   console.log('PASS failed/uncertain creation preserves the same room, theme, version and joined members');

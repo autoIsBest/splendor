@@ -894,10 +894,13 @@ console.log('完整对局 ' + steps + ' 步 + 结算后重绘 OK');
 // Exercise the compiled template/module bundle for every new room theme.
 const themesPreview = run(844, 390);
 const tp = themesPreview.page;
-['pokemon', 'pixel', 'ai'].forEach(function (id) {
+['pokemon', 'pixel', 'immortal'].forEach(function (id) {
   tp.onOpenHomeDialog({ currentTarget: { dataset: { kind: 'create' } } });
-  assert((themesPreview.host.innerHTML.match(/data-tap="onSelectRoomTheme"/g) || []).length === 4, '建房须提供四套主题');
+  assert((themesPreview.host.innerHTML.match(/data-tap="onSelectRoomTheme"/g) || []).length === 3, '建房须提供三套主题');
   assert(themesPreview.host.innerHTML.indexOf('theme-thumb-pixel') > 0, '建房应展示红白机像素主题入口');
+  assert(themesPreview.host.innerHTML.indexOf('theme-thumb-immortal') > 0, '建房应展示凡人修仙传主题入口');
+  assert(themesPreview.host.innerHTML.indexOf('theme-thumb-royal') < 0, '皇家商会已从选择器停用');
+  assert(themesPreview.host.innerHTML.indexOf('theme-thumb-ai') < 0, 'AI 主题已停用');
   assert(themesPreview.host.innerHTML.indexOf('theme-thumb-cyberpunk') < 0, '赛博朋克主题已暂时停用');
   tp.onSelectRoomTheme({ currentTarget: { dataset: { id: id } } });
   tp.onCreateRoom();
@@ -928,7 +931,7 @@ const tp = themesPreview.page;
   assert(themesPreview.host.innerHTML.indexOf('viewport theme-royal') > 0, '退房恢复大厅默认主题');
 });
 tp.onUnload();
-console.log('四主题入口 / 三套主题房间与牌桌 / 退房恢复 OK');
+console.log('三主题入口 / 三套主题房间与牌桌 / 退房恢复 OK');
 
 /* ---------- 随机 1 号位：渲染层号位随锚点一起换 ---------- */
 {

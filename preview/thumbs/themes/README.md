@@ -1,31 +1,43 @@
 # 多主题插画
 
-2026-11-11 通过 9Router 的 `ag/gemini-3.1-flash-image` 生成三套 3×3 插画图集，
-再由 `preview/prepare-theme-art.py` 去除分格细线并压缩为 480×480 JPEG。
-原始大图保存在工程外；常规构建只依赖这里的三个轻量成品。
+2026-11-18 起启用三套房间主题：`pokemon`、`pixel`、`immortal`。
+`royal` 只保留为大厅与未知主题回退，不再出现在建房选择中；`ai` 停用，
+但保留 `ai.jpg` 供后续恢复。
 
-- `pokemon.jpg`：皮卡丘、妙蛙种子、杰尼龟、小火龙、伊布、可达鸭、卡比兽、快龙、耿鬼的冒险插画。
-- `cyberpunk.jpg`：霓虹街区、义体信使、高架列车、服务器、黑客、无人机、骑手、温室与机械乌鸦。
-- `ai.jpg`：2026-11-12 按社区拟人调研重绘，顺序固定为 GPT 白龙、Claude 橙发向日葵、Gemini 星形猫耳、DeepSeek 鲸鱼、Qwen 国风折扇、Grok 金发哥特、Llama 羊驼、GLM 黑白狐、豆包 Seed。
+## 当前图集
 
-图片不包含卡牌数值和操作文字。卡牌身份、成本、声望与资源颜色均由游戏数据层提供。
-拟人角色为本项目的主题演绎，不作为模型供应商的官方角色形象。
+- `pokemon.jpg`：432×432，3×3，每格 144px。皮卡丘、妙蛙种子、杰尼龟、小火龙、伊布、可达鸭、卡比兽、快龙、耿鬼。
+- `pixel.jpg`：576×432，4×3，每格 144px。前 9 格沿用红白机像素图集；新增第 10–12 格为森林猎手、迷宫法师、机械飞龙。
+- `immortal.jpg`：576×432，4×3，每格 144px。韩立、南宫婉、紫灵、银月、乐上师、仲神师、元瑶、啼魂、慕沛灵、宋玉、梅凝、董萱儿。
 
-`preview/theme-art.js` 将图集一次性内嵌到各主题的独立样式文件，
-再使用背景位置映射到卡牌、贵族、头像与主题预览，避免每张卡重复内嵌图片。
+`cyberpunk.jpg` 与 `ai.jpg` 仅作为停用主题的历史素材保留，不进入当前构建。
 
-## AI 图集第二版
+## 凡人修仙传 Q版图集
 
-- 生成模型：9Router `ag/gemini-3.1-flash-image`，2026-11-12。
-- 角色参考与原作链接：[AI 拟人调研](../../../docs/ai-persona-research.md)。按角色识别元素重新生成插画，未把参考站的缩略图放入游戏资源。
-- 完整生成提示词：[ai-prompt.txt](ai-prompt.txt)。原始图为 1024×1024，保存在工程外。
-- 成品为 480×480 JPEG，共 52082 字节，九格各 160×160；压缩参数为 quality 60、optimize true、非渐进 JPEG。
-- 格子顺序与 `utils/theme.js` 中的模型名称顺序对应，不可单独交换图片或名称。
+最终版按用户确认改为 2D Q版。此前“真人 / 官方截帧”方案因 144px 下缩图发糊而废弃，
+不再作为当前素材。
 
-仅更新 AI 图集时，把原始图命名为 `splendor-ai-atlas.png` 并执行：
+- 12 张 1024×1024 角色立绘由 9Router `ag/gemini-3.1-flash-image` 生成；统一提示词为 2D chibi sticker、粗描边、平涂、大头小身、淡紫背景、无文字 / 水印。
+- 生成顺序（也是牌库顺序）：韩立、南宫婉、紫灵、银月、乐上师、仲神师、元瑶、啼魂、慕沛灵、宋玉、梅凝、董萱儿。
+- 工程外脚本按固定方形裁切后合成 `immortal.jpg`（576×432，4×3，每格 144px）；JPEG quality 65、4:2:0、`optimize=True`，成品 59844 字节。
+- 角色 IP 归原作；Q版立绘为本项目生成的主题演绎，仅用于主题演示。早期写实二创 / 官方截帧来源不再使用，仅保留在 git 历史中。
+
+## 压缩与构建
+
+- 全部图集统一为每格 144px；`pixel` / `immortal` 为 4×3、576×432。
+- `pixel` JPEG quality 52；`immortal` quality 65；均使用 4:2:0、`optimize=True`，避免主包 base64 内联后超过 2MiB。
+- `preview/theme-art.js` 将图集一次性内嵌到各主题的独立样式文件，再通过背景位置映射到卡牌、贵族、头像和主题预览。
+- `preview/prepare-theme-art.py` 继续处理 `pixel` 等规则网格；`immortal` 的最终合成使用工程外脚本 `build_qatlas.py` 按 12 个裁切框完成，源图与脚本不进入主包。
+
+常规构建：
 
 ```sh
-uv run --with pillow python preview/prepare-theme-art.py SOURCE_DIRECTORY ai
+node preview/art.js
+node preview/build.js
 ```
 
-省略最后的主题参数时仍处理全部三套图集。常规构建继续执行 `node preview/art.js` 和 `node preview/build.js`。
+仅重建图集样式时：
+
+```sh
+uv run --with pillow python preview/prepare-theme-art.py SOURCE_DIRECTORY pixel immortal
+```
