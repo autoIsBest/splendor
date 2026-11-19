@@ -103,6 +103,16 @@ async function main() {
   assert.equal(T.caption('genshin', 6), '旅行者·空');
   assert.equal(T.caption('genshin', 7), '旅行者·荧');
   const genshinCss = fs.readFileSync(path.join(ROOT, 'pages/index/theme-genshin.wxss'), 'utf8');
+  // WXSS does not support attribute selectors, even though H5 browsers do.
+  fs.readdirSync(path.join(ROOT, 'pages/index')).filter(function (name) { return /^theme-.*\.wxss$/.test(name); }).forEach(function (name) {
+    const css = fs.readFileSync(path.join(ROOT, 'pages/index', name), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    css.replace(/([^{}]+)\{/g, function (_, selector) {
+      assert(!/\[[^\]]*\]/.test(selector), name + ': WXSS 不支持属性选择器');
+      return _;
+    });
+  });
+  for (let i = 0; i < 90; i++) assert(genshinCss.includes('.theme-genshin .card-photo.photo-' + i + ','));
+  for (let i = 0; i < 10; i++) assert(genshinCss.includes('.theme-genshin .noble-photo.noble-photo-' + i + ','));
   const embedded = genshinCss.match(/data:image\/jpeg;base64,([^"\)]+)/g) || [];
   assert.equal(embedded.length, 1, '原神图集只嵌入一次');
   assert(Buffer.from(embedded[0].split(',')[1], 'base64').equals(fs.readFileSync(path.join(ROOT, 'preview/thumbs/themes/genshin-review-atlas.jpg'))));
